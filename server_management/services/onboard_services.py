@@ -1,10 +1,11 @@
 import re
+from fastapi import Depends
 from sqlalchemy.orm import Session
 from server_management.database.db_models import (
     Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
     RuleAnalysisResult, LlmVerdict, RuleVerdict, ScanStatus
     )
-from server_management.database.db_config import session as sessionlocal
+from server_management.database.db_config import get_db
 
 def normalize_repo_url(repo_url: str) -> str:
     """Extract 'owner/repo' from any GitHub URL format the user might type."""
@@ -74,7 +75,7 @@ def update_manifest(session: Session, server_id: str, *,
 
 
 def create_scan_run(server_id: str, commit_sha: str) -> ScanRun:
-    session=sessionlocal()
+    session=Depends(get_db)
     run = ScanRun(server_id=server_id, commit_sha=commit_sha, status=ScanStatus.QUEUED)
     session.add(run)
     session.commit()
