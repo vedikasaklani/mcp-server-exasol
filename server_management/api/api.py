@@ -24,7 +24,7 @@ from server_management.services.onboard_services import(
 from server_management.api.models import (ServerResponse, ManifestResponse, 
         ScanRunResponse, ToolDeclarationsResponse,RegisterServerRequest, UpdateManifestRequest
         , CreateScanRunRequest, RuleAnalysisResultRequest, LlmAnalysisResultRequest)
-from server_management.db_config import get_db
+from server_management.database.db_config import get_db
 import server_management.api.githubapp as githubapp
 
 engine = create_engine("sqlite:///./registry.db")
