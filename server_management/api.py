@@ -25,12 +25,14 @@ from server_management.models import (ServerResponse, ManifestResponse,
         ScanRunResponse, ToolDeclarationsResponse,RegisterServerRequest, UpdateManifestRequest
         , CreateScanRunRequest, RuleAnalysisResultRequest, LlmAnalysisResultRequest)
 from server_management.db_config import get_db
+import githubapp
 
 engine = create_engine("sqlite:///./registry.db")
 Base.metadata.create_all(engine)
 SessionLocal = sessionmaker(bind=engine)
 
 app = FastAPI()
+app.include_router(githubapp.router)
 #for operators
 @app.post("/servers", response_model=ServerResponse)
 def api_register_server(req: RegisterServerRequest, db: Session = Depends(get_db)):
