@@ -33,7 +33,6 @@ SessionLocal = sessionmaker(bind=engine)
 
 app = FastAPI()
 app.include_router(githubapp.router)
-app.include_router(cisco.api.router)
 #for operators
 @app.post("/servers", response_model=ServerResponse)
 def api_register_server(req: RegisterServerRequest, db: Session = Depends(get_db)):
