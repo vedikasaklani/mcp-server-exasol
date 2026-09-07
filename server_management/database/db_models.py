@@ -104,7 +104,7 @@ class ScanRun(Base):
     status = Column(SAEnum(ScanStatus), nullable=False, default=ScanStatus.QUEUED)
     started_at = Column(DateTime, server_default=func.now())
     finished_at = Column(DateTime, nullable=True)
-
+    
     server = relationship("Server", back_populates="scan_runs")
     rule_result = relationship("RuleAnalysisResult", back_populates="scan_run", uselist=False)
     llm_result = relationship("LlmAnalysisResult", back_populates="scan_run", uselist=False)

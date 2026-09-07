@@ -1,4 +1,5 @@
 import re
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from server_management.database.db_models import (
     Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
