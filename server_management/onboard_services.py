@@ -5,9 +5,17 @@ from server_management.db_models import (
     RuleAnalysisResult, LlmVerdict, RuleVerdict, ScanStatus
     )
 from server_management.db_config import session as sessionlocal
+
+def normalize_repo_url(repo_url: str) -> str:
+    """Extract 'owner/repo' from any GitHub URL format the user might type."""
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$", repo_url.strip())
+    if not match:
+        raise ValueError(f"Could not parse GitHub repo URL: {repo_url}")
+    return match.group(1).lower()
+
 def register_server(session: Session, repo_url: str, installation_id: int,
                      allowed_destinations: list[str]) -> Server:
-    server = Server(repo_url=repo_url, installation_id=installation_id)
+    server = Server(repo_url=normalize_repo_url(repo_url), installation_id=installation_id)
     session.add(server)
     session.flush() 
 
@@ -29,12 +37,6 @@ def register_server(session: Session, repo_url: str, installation_id: int,
 def get_manifest(session: Session, server_id: str) -> ServerManifest | None:
     return session.get(ServerManifest, server_id)
 
-def normalize_repo_url(repo_url: str) -> str:
-    """Extract 'owner/repo' from any GitHub URL format the user might type."""
-    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$", repo_url.strip())
-    if not match:
-        raise ValueError(f"Could not parse GitHub repo URL: {repo_url}")
-    return match.group(1).lower()
 
 def get_server_by_repo_and_installation(session:Session, repo_url:str, installation_id:int):
     server = (
