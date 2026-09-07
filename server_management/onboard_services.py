@@ -28,6 +28,16 @@ def register_server(session: Session, repo_url: str, installation_id: int,
 def get_manifest(session: Session, server_id: str) -> ServerManifest | None:
     return session.get(ServerManifest, server_id)
 
+def get_server_by_repo_and_installation(session:Session, repo_url:str, installation_id:int):
+    server = (
+        session.query(Server)
+        .filter(
+            Server.repo_url == repo_url,
+            Server.installation_id == installation_id
+        )
+        .first()
+    )
+    return server
 
 def update_manifest(session: Session, server_id: str, *,
                      allowed_destinations: list[str] | None = None,

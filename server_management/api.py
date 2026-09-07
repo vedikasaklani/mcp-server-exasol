@@ -31,7 +31,6 @@ Base.metadata.create_all(engine)
 SessionLocal = sessionmaker(bind=engine)
 
 app = FastAPI()
-
 #for operators
 @app.post("/servers", response_model=ServerResponse)
 def api_register_server(req: RegisterServerRequest, db: Session = Depends(get_db)):
@@ -58,7 +57,6 @@ def api_get_manifest(server_id: str, db: Session = Depends(get_db)):
         tool_declarations=manifest.tool_declarations,
         version=manifest.version,
     )
-
 
 @app.patch("/servers/{server_id}/manifest", response_model=ManifestResponse)
 def api_update_manifest(server_id: str, req: UpdateManifestRequest, db: Session = Depends(get_db)):
