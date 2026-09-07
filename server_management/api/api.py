@@ -13,19 +13,19 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-from server_management.db_models import (
+from server_management.database.db_models import (
     Base, ScanRun,
 )
-from server_management.onboard_services import(
+from server_management.services.onboard_services import(
     register_server, get_manifest, update_manifest,
     create_scan_run, record_rule_analysis_result, record_llm_analysis_result,
     get_tool_declarations_for_llm_phase,
 )
-from server_management.models import (ServerResponse, ManifestResponse, 
+from server_management.api.models import (ServerResponse, ManifestResponse, 
         ScanRunResponse, ToolDeclarationsResponse,RegisterServerRequest, UpdateManifestRequest
         , CreateScanRunRequest, RuleAnalysisResultRequest, LlmAnalysisResultRequest)
 from server_management.db_config import get_db
-import server_management.githubapp as githubapp
+import server_management.api.githubapp as githubapp
 
 engine = create_engine("sqlite:///./registry.db")
 Base.metadata.create_all(engine)

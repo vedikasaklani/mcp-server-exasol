@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from server_management.db_models import ScanStatus, LlmVerdict, RuleVerdict
+from server_management.database.db_models import ScanStatus, LlmVerdict, RuleVerdict
 
 class RegisterServerRequest(BaseModel):
     repo_url: str

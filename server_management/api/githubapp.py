@@ -5,12 +5,14 @@ from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from server_management.db_config import get_db
-from server_management.onboard_services import (
+from server_management.database.db_config import get_db
+from server_management.services.onboard_services import (
     register_server, create_scan_run, get_server_by_repo_and_installation,
 )
-from server_management.models import RegisterServerRequest
+from server_management.api.models import RegisterServerRequest
 from fastapi.responses import HTMLResponse
+from server_management.services.scan_pipeline import trigger_scan
+
 router = APIRouter(prefix="/github")
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -56,9 +58,9 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
     server = get_server_by_repo_and_installation(db, repo_url, installation_id)
     if server is None:
         return {"status": "ignored", "reason": "unregistered server"}
-
-    background_tasks.add_task(create_scan_run, server_id=server.server_id, commit_sha=commit_sha)
-    print("Background task added")
+    run=create_scan_run(server_id=server.server_id, commit_sha=commit_sha)
+    background_tasks.add_task(trigger_scan, run.scan_run_id)
+    print("Background to trigger scan added")
     return {"status": "accepted"}
 
 

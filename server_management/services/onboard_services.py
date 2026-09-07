@@ -1,10 +1,10 @@
 import re
 from sqlalchemy.orm import Session
-from server_management.db_models import (
+from server_management.database.db_models import (
     Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
     RuleAnalysisResult, LlmVerdict, RuleVerdict, ScanStatus
     )
-from server_management.db_config import session as sessionlocal
+from server_management.database.db_config import session as sessionlocal
 
 def normalize_repo_url(repo_url: str) -> str:
     """Extract 'owner/repo' from any GitHub URL format the user might type."""
