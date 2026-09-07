@@ -1,3 +1,4 @@
+import re
 from sqlalchemy.orm import Session
 from server_management.db_models import (
     Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
@@ -28,11 +29,18 @@ def register_server(session: Session, repo_url: str, installation_id: int,
 def get_manifest(session: Session, server_id: str) -> ServerManifest | None:
     return session.get(ServerManifest, server_id)
 
+def normalize_repo_url(repo_url: str) -> str:
+    """Extract 'owner/repo' from any GitHub URL format the user might type."""
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$", repo_url.strip())
+    if not match:
+        raise ValueError(f"Could not parse GitHub repo URL: {repo_url}")
+    return match.group(1).lower()
+
 def get_server_by_repo_and_installation(session:Session, repo_url:str, installation_id:int):
     server = (
         session.query(Server)
         .filter(
-            Server.repo_url == repo_url,
+            Server.repo_url == normalize_repo_url(repo_url),
             Server.installation_id == installation_id
         )
         .first()
