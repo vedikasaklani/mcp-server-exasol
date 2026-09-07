@@ -3,7 +3,7 @@ from server_management.db_models import (
     Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
     RuleAnalysisResult, LlmVerdict, RuleVerdict, ScanStatus
     )
-
+from server_management.db_config import session as sessionlocal
 def register_server(session: Session, repo_url: str, installation_id: int,
                      allowed_destinations: list[str]) -> Server:
     server = Server(repo_url=repo_url, installation_id=installation_id)
@@ -63,7 +63,8 @@ def update_manifest(session: Session, server_id: str, *,
     return manifest
 
 
-def create_scan_run(session: Session, server_id: str, commit_sha: str) -> ScanRun:
+def create_scan_run(server_id: str, commit_sha: str) -> ScanRun:
+    session=sessionlocal()
     run = ScanRun(server_id=server_id, commit_sha=commit_sha, status=ScanStatus.QUEUED)
     session.add(run)
     session.commit()

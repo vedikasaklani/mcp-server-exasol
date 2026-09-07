@@ -57,7 +57,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
     if server is None:
         return {"status": "ignored", "reason": "unregistered server"}
 
-    background_tasks.add_task(create_scan_run, db, server_id=server.server_id, commit_sha=commit_sha)
+    background_tasks.add_task(create_scan_run, server_id=server.server_id, commit_sha=commit_sha)
     return {"status": "accepted"}
 
 
