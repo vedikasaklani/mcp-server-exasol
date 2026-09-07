@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 load_dotenv(override=True)
 db_url=os.environ["DATABASE_URL"]
 engine=create_engine(db_url)
-session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+session = sessionmaker(expire_on_commit=False, autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
