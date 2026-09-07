@@ -25,7 +25,7 @@ from server_management.models import (ServerResponse, ManifestResponse,
         ScanRunResponse, ToolDeclarationsResponse,RegisterServerRequest, UpdateManifestRequest
         , CreateScanRunRequest, RuleAnalysisResultRequest, LlmAnalysisResultRequest)
 from server_management.db_config import get_db
-import githubapp
+import server_management.githubapp as githubapp
 
 engine = create_engine("sqlite:///./registry.db")
 Base.metadata.create_all(engine)
