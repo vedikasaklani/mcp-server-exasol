@@ -115,7 +115,6 @@ ruamel.yaml==0.19.1
 ruamel.yaml.clib==0.2.15
 scipy==1.18.1
 semantic-version==2.10.0
-semgrep==1.176.1
 six==1.17.0
 SQLAlchemy==2.0.52
 sse-starlette==3.4.11
