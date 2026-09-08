@@ -111,7 +111,10 @@ def run_semgrep_scan(repo_path: str) -> list[dict]:
     if os.path.exists(custom_rules):
         configs.append(custom_rules)
 
-    cmd = ["semgrep", "scan", "--json", "--quiet"]
+    # semgrep lives in its own isolated venv (see Dockerfile) because it
+    # pins a different "mcp" version than the app's fastmcp-slim dependency.
+    semgrep_bin = os.environ.get("SEMGREP_BIN", "semgrep")
+    cmd = [semgrep_bin, "scan", "--json", "--quiet"]
     for cfg in configs:
         cmd += ["--config", cfg]
     cmd.append(repo_path)
