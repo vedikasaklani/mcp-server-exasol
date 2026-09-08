@@ -7,21 +7,38 @@ GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
 GITHUB_PRIVATE_KEY = os.environ["GITHUB_PRIVATE_KEY"]  
 
 def _load_private_key() -> str:
-    """Normalize a GitHub App PEM private key from an environment variable."""
-
     key = GITHUB_PRIVATE_KEY.strip()
 
-    # Handle escaped newlines from environment variables.
+    print(
+        "GITHUB KEY DEBUG:",
+        {
+            "length": len(key),
+            "starts_with": repr(key[:40]),
+            "ends_with": repr(key[-40:]),
+            "literal_backslash_n": "\\n" in key,
+            "literal_backslash_r": "\\r" in key,
+            "newline_count": key.count("\n"),
+        },
+        flush=True,
+    )
+
     key = key.replace("\\r\\n", "\n")
     key = key.replace("\\n", "\n")
     key = key.replace("\\r", "\n")
 
-    # Handle accidental surrounding quotes.
     if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
         key = key[1:-1].strip()
 
-    # Normalize PEM line endings.
-    key = key.replace("\r\n", "\n").replace("\r", "\n")
+    print(
+        "GITHUB KEY AFTER NORMALIZATION:",
+        {
+            "length": len(key),
+            "starts_with": repr(key[:40]),
+            "ends_with": repr(key[-40:]),
+            "newline_count": key.count("\n"),
+        },
+        flush=True,
+    )
 
     return key
 
