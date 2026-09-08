@@ -2,12 +2,14 @@
 Phase 2 (Cisco behavioral LLM analysis), unless Phase 1 already FAILed.'''
 '''Do not remove print lines, they are important for logging'''
 
+import asyncio
 import subprocess
 import tempfile
 import shutil
 import json
 import re
 
+from sqlalchemy import func
 from server_management.database.db_config import session as SessionLocal
 from server_management.database.db_models import Server, ScanRun, ScanStatus, RuleVerdict, LlmVerdict
 from server_management.api.github_auth import get_installation_token
@@ -16,14 +18,24 @@ from server_management.services.static_analysis import extract_tool_declarations
 
 FAIL_SEVERITIES = {"CRITICAL", "HIGH"}
 
+# Matches the token embedded in the clone URL's userinfo; used to mask it out
+_TOKEN_IN_URL = re.compile(r"x-access-token:[^@\s]*@")
 
-def normalize_repo(input_str: str) -> str:
-    """'owner/repo', a full URL, or a .git URL -> normalized 'owner/repo'."""
-    input_str = input_str.strip()
-    match = re.search(r"(?:github\.com[:/])?([^/]+)/([^/]+?)(\.git)?/?$", input_str)
-    if not match:
-        raise ValueError(f"Could not parse repo identifier: {input_str}")
-    return f"{match.group(1)}/{match.group(2)}".lower()
+
+def _sanitize(text: str) -> str:
+    """Mask embedded credentials (the x-access-token URL userinfo)."""
+    return _TOKEN_IN_URL.sub("x-access-token:***@", text)
+
+
+def _set_status(scan_run_id: str, status: ScanStatus) -> None:
+    db = SessionLocal()
+    try:
+        run = db.get(ScanRun, scan_run_id)
+        if run is not None:
+            run.status = status
+            db.commit()
+    finally:
+        db.close()
 
 
 def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
@@ -39,7 +51,7 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         shutil.rmtree(workdir, ignore_errors=True)
         detail = e.stderr if isinstance(e, subprocess.CalledProcessError) else str(e)
-        raise RuntimeError(f"git clone/checkout failed: {detail}") from e
+        raise RuntimeError(f"git clone/checkout failed: {_sanitize(detail)}") from e
     return workdir
 
 
@@ -64,11 +76,16 @@ def run_behavioral_scan(repo_path: str) -> dict:
 
 
 def _extract_findings(raw_result) -> list[dict]:
-    """to be verified"""
+    """to be verified against real mcp-scanner --format raw output - if the
+    actual shape differs from this assumption, findings silently come back
+    empty and every scan passes, so pin this with a fixture test."""
+    if raw_result is None:
+        return []
     items = raw_result if isinstance(raw_result, list) else raw_result.get("results", [raw_result])
     findings = []
     for item in items:
-        findings.extend(item.get("findings", []))
+        if isinstance(item, dict):
+            findings.extend(item.get("findings", []))
     return findings
 
 
@@ -98,17 +115,21 @@ async def trigger_scan(scan_run_id: str) -> None:
             await scan_fail(scan_run_id, reason=f"token exchange failed: {e}")
             return
 
+        _set_status(scan_run_id, ScanStatus.PULLING_CODE)
         try:
-            repo_path = clone_repo(server.repo_url, run.commit_sha, access_token)
+            repo_path = await asyncio.to_thread(
+                clone_repo, server.repo_url, run.commit_sha, access_token)
         except Exception as e:
             await scan_fail(scan_run_id, reason=str(e))
             return
 
-        # Phase 1: rule-based 
+        # Phase 1: rule-based
+        _set_status(scan_run_id, ScanStatus.RULE_ANALYSIS_RUNNING)
         try:
-            rule_findings = _extract_findings(run_vulnerable_package_scan(repo_path))
-            rule_findings += run_semgrep_scan(repo_path)
-            tool_declarations = extract_tool_declarations(repo_path)
+            rule_findings = _extract_findings(
+                await asyncio.to_thread(run_vulnerable_package_scan, repo_path))
+            rule_findings += await asyncio.to_thread(run_semgrep_scan, repo_path)
+            tool_declarations = await asyncio.to_thread(extract_tool_declarations, repo_path)
         except Exception as e:
             await scan_fail(scan_run_id, reason=f"phase 1 scan failed: {e}")
             return
@@ -117,24 +138,31 @@ async def trigger_scan(scan_run_id: str) -> None:
             rule_findings, RuleVerdict.FAIL, RuleVerdict.PASS_WITH_FINDINGS, RuleVerdict.PASS
         )
 
-        # Manifest + manifest-history commit happens on every scan,
+        # The manifest + manifest-history commit happens inside
+        # record_rule_analysis_result
         db = SessionLocal()
         try:
             record_rule_analysis_result(
                 db, scan_run_id, verdict=rule_verdict,
                 rule_findings=rule_findings, tool_declarations=tool_declarations,
             )
-        finally:
+        except Exception as e:
+            db.rollback()
             db.close()
+            await scan_fail(scan_run_id, reason=f"phase 1 recording failed: {e}")
+            return
+        db.close()
         await scan_pass(scan_run_id, phase="rule", verdict=rule_verdict)
 
         if rule_verdict == RuleVerdict.FAIL:
             print(f"scan {scan_run_id} REJECTED at phase 1 - phase 2 skipped")
             return
 
-        # Phase 2: Cisco behavioral (LLM) 
+        # Phase 2: Cisco behavioral (LLM)
+        _set_status(scan_run_id, ScanStatus.LLM_ANALYSIS_RUNNING)
         try:
-            llm_findings = _extract_findings(run_behavioral_scan(repo_path))
+            llm_findings = _extract_findings(
+                await asyncio.to_thread(run_behavioral_scan, repo_path))
         except Exception as e:
             await scan_fail(scan_run_id, reason=f"phase 2 scan failed: {e}")
             return
@@ -146,8 +174,14 @@ async def trigger_scan(scan_run_id: str) -> None:
         try:
             record_llm_analysis_result(db, scan_run_id, verdict=llm_verdict, llm_findings=llm_findings)
         except ValueError as e:
+            db.rollback()
             db.close()
             await scan_fail(scan_run_id, reason=f"phase 2 recording rejected: {e}")
+            return
+        except Exception as e:
+            db.rollback()
+            db.close()
+            await scan_fail(scan_run_id, reason=f"phase 2 recording failed: {e}")
             return
         db.close()
         await scan_pass(scan_run_id, phase="llm", verdict=llm_verdict)
@@ -163,11 +197,13 @@ async def scan_pass(scan_run_id: str, phase: str, verdict) -> None:
 
 async def scan_fail(scan_run_id: str, reason: str) -> None:
     print(f"scan has failed... {scan_run_id}: {reason}")
+    terminal = {ScanStatus.REJECTED, ScanStatus.STATIC_ANALYSIS_PASSED, ScanStatus.FAILED}
     db = SessionLocal()
     try:
         run = db.get(ScanRun, scan_run_id)
-        if run is not None:
+        if run is not None and run.status not in terminal:
             run.status = ScanStatus.FAILED
+            run.finished_at = func.now()
             db.commit()
     finally:
         db.close()
