@@ -11,10 +11,17 @@ def _load_private_key() -> str:
 
     key = GITHUB_PRIVATE_KEY.strip()
 
-    key = key.replace(r"\n", "\n")
+    # Handle escaped newlines from environment variables.
+    key = key.replace("\\r\\n", "\n")
+    key = key.replace("\\n", "\n")
+    key = key.replace("\\r", "\n")
 
+    # Handle accidental surrounding quotes.
     if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
         key = key[1:-1].strip()
+
+    # Normalize PEM line endings.
+    key = key.replace("\r\n", "\n").replace("\r", "\n")
 
     return key
 
