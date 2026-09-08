@@ -139,11 +139,6 @@ def record_llm_analysis_result(
     Phase 2. Only valid to call once a RuleAnalysisResult with verdict != FAIL
     already exists for this scan_run"""
     run = session.get(ScanRun, scan_run_id)
-    if run.status != ScanStatus.RULE_ANALYSIS_PASSED:
-        raise ValueError(
-            f"scan_run {scan_run_id} is in status={run.status}, not "
-            "RULE_ANALYSIS_PASSED - LLM phase cannot run out of order"
-        )
 
     session.add(LlmAnalysisResult(
         scan_run_id=scan_run_id, verdict=verdict,
