@@ -8,7 +8,7 @@ from cryptography.hazmat.backends import default_backend
 GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
 GITHUB_PRIVATE_KEY = os.environ["GITHUB_PRIVATE_KEY"]
 
-
+"""this is a specific fix to prevent mismatch of github key and stored key in render env"""
 def _load_private_key() -> bytes:
     """
     Load GitHub private key from environment and normalize for JWT signing.
@@ -23,7 +23,6 @@ def _load_private_key() -> bytes:
         key = key[1:-1]
 
     # Step 2: Normalize escaped sequences to actual newlines
-    # Render stores as: "-----BEGIN RSA PRIVATE KEY-----\\n..."
     key = key.replace("\\n", "\n")
     key = key.replace("\\r\\n", "\n")  # Handle Windows line endings
     key = key.replace("\\r", "")        # Remove any remaining carriage returns
