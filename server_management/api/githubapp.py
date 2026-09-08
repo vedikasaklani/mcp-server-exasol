@@ -1,6 +1,8 @@
 import hmac
 import hashlib
 import os
+import asyncio
+import traceback
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -35,6 +37,14 @@ def _verify_signature(body: bytes, signature_header: str | None) -> None:
     if not hmac.compare_digest(expected, signature_header):
         raise HTTPException(401, "Invalid signature")
 
+def _run_scan_background(scan_run_id: str) -> None:
+    print(f"BACKGROUND SCAN STARTING: {scan_run_id}", flush=True)
+    try:
+        asyncio.run(trigger_scan(scan_run_id))
+        print(f"BACKGROUND SCAN FINISHED: {scan_run_id}", flush=True)
+    except Exception as e:
+        print(f"BACKGROUND SCAN CRASHED: {scan_run_id}: {e}", flush=True)
+        traceback.print_exc()
 
 @router.post("/webhook")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -59,8 +69,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
     if server is None:
         return {"status": "ignored", "reason": "unregistered server"}
     run=create_scan_run(server_id=server.server_id, commit_sha=commit_sha)
-    background_tasks.add_task(trigger_scan, run.scan_run_id)
-    print("Background to trigger scan added")
+    background_tasks.add_task(_run_scan_background, run.scan_run_id)
+    print(f"Background to trigger scan added {run.scan_run_id}", flush=True)
     return {"status": "accepted"}
 
 
