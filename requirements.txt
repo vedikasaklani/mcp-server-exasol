@@ -91,7 +91,7 @@ pillow==12.3.0
 platformdirs==4.11.7
 propcache==0.5.2
 protobuf==6.33.6
-psycopg2-binary==2.9.12
+psycopg2==2.9.12
 py-key-value-aio==0.4.5
 py_rust_stemmers==0.1.8
 pycparser==3.0
