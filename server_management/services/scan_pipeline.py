@@ -116,6 +116,7 @@ async def trigger_scan(scan_run_id: str) -> None:
             return
 
         _set_status(scan_run_id, ScanStatus.PULLING_CODE)
+        print("token exchange passed, pulling code now!")
         try:
             repo_path = await asyncio.to_thread(
                 clone_repo, server.repo_url, run.commit_sha, access_token)
