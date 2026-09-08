@@ -18,6 +18,11 @@ RUN python -m venv /opt/semgrep-venv && \
 # Make the semgrep binary discoverable without polluting the app's venv
 ENV SEMGREP_BIN=/opt/semgrep-venv/bin/semgrep
 
+RUN python -m venv /opt/mcpscanner-venv && \
+    /opt/mcpscanner-venv/bin/pip install --no-cache-dir mcp-scanner
+
+ENV MCP_SCANNER_BIN=/opt/mcpscanner-venv/bin/mcp-scanner
+
 # Set working directory
 WORKDIR /app
 

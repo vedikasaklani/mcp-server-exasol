@@ -1,15 +1,12 @@
 '''Phase 1 building blocks: mechanical tool_declarations extraction (AST-only,
-never executes target code), Semgrep pattern scanning, and the manifest +
-manifest-history commit that must happen on every scan per the schema.'''
+never executes target code) and Semgrep pattern scanning. The manifest +
+manifest-history commit lives in onboard_services.update_manifest, called by
+record_rule_analysis_result - there is intentionally no commit path here.'''
 
 import ast
 import json
 import os
 import subprocess
-
-from sqlalchemy.orm import Session
-
-from server_management.database.db_models import ServerManifest, ManifestHistory
 
 _SKIP_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", "dist", "build"}
 
@@ -134,29 +131,3 @@ def run_semgrep_scan(repo_path: str) -> list[dict]:
             "severity": severity_map.get(r.get("extra", {}).get("severity"), "LOW"),
         })
     return findings
-
-
-# Manifest + manifest-history commit
-
-def commit_tool_declarations(db: Session, server_id: str, tool_declarations: list[dict],
-                              change_reason: str = "static_analysis") -> None:
-    """Writes freshly-extracted tool_declarations to the current-state
-    manifest (bumping its version) and appends a matching row to
-    ManifestHistory. allowed_destinations is untouched here - it stays
-    operator-declared and is only ever changed via the manifest-edit flow."""
-    manifest = db.get(ServerManifest, server_id)
-    if manifest is None:
-        raise ValueError(f"no manifest found for server_id={server_id}")
-
-    new_version = manifest.version + 1
-    manifest.tool_declarations = tool_declarations
-    manifest.version = new_version  # updated_at bumps automatically (onupdate=func.now())
-
-    db.add(ManifestHistory(
-        server_id=server_id,
-        version=new_version,
-        allowed_destinations=manifest.allowed_destinations,
-        tool_declarations=tool_declarations,
-        change_reason=change_reason,
-    ))
-    db.commit()

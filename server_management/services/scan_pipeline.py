@@ -56,8 +56,10 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
 
 
 def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
+    mcp_scanner_bin=os.environ.get("MCP_SCANNER_BIN", "mcp-scanner")
+
     result = subprocess.run(
-        ["mcp-scanner", command, repo_path, "--format", "raw"],
+        [mcp_scanner_bin, command, repo_path, "--format", "raw"],
         capture_output=True, text=True, timeout=timeout,
     )
     if result.returncode not in (0, 1):  # 1 = "findings present", not a crash
