@@ -10,7 +10,7 @@ RUN apt-get update && \
         libpq-dev \
         python3-dev \
     && rm -rf /var/lib/apt/lists/*
-    
+
 #semgrep is downloaded in venv as it has differernt mcp version dependency than fastmcp
 RUN python -m venv /opt/semgrep-venv && \
     /opt/semgrep-venv/bin/pip install --no-cache-dir semgrep==1.176.1
@@ -38,4 +38,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/ || exit 1
 
 # Run the application
-CMD uvicorn service_management.api.api:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn server_management.api.api:app --host 0.0.0.0 --port ${PORT:-8000}
