@@ -57,14 +57,13 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
 
 
 def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
-    mcp_scanner_bin=os.environ.get("MCP_SCANNER_BIN", "mcp-scanner")
-
+    mcp_scanner_bin = os.environ.get("MCP_SCANNER_BIN", "mcp-scanner")
     result = subprocess.run(
         [mcp_scanner_bin, command, repo_path, "--format", "raw"],
         capture_output=True, text=True, timeout=timeout,
     )
-    if result.returncode not in (0, 1):  # 1 = "findings present", not a crash
-        raise RuntimeError(f"mcp-scanner {command} failed: {result.stderr}")
+    if result.returncode != 0:
+        raise RuntimeError(f"mcp-scanner {command} failed (exit {result.returncode}): {result.stderr.strip()}")
     return json.loads(result.stdout)
 
 
@@ -79,16 +78,17 @@ def run_behavioral_scan(repo_path: str) -> dict:
 
 
 def _extract_findings(raw_result) -> list[dict]:
-    """to be verified against real mcp-scanner --format raw output - if the
-    actual shape differs from this assumption, findings silently come back
-    empty and every scan passes, so pin this with a fixture test."""
-    if raw_result is None:
+    if not raw_result:
         return []
-    items = raw_result if isinstance(raw_result, list) else raw_result.get("results", [raw_result])
+    entries = raw_result.get("scan_results", []) if isinstance(raw_result, dict) else raw_result
     findings = []
-    for item in items:
-        if isinstance(item, dict):
-            findings.extend(item.get("findings", []))
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        analyzers = entry.get("findings", {})
+        for analyzer_name, f in analyzers.items():
+            if isinstance(f, dict) and f.get("total_findings", 0) > 0:
+                findings.append({**f, "analyzer": analyzer_name, "target": entry.get("package_name")})
     return findings
 
 
