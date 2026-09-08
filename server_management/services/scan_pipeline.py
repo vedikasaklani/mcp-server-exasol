@@ -64,6 +64,11 @@ def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
     )
     if result.returncode != 0:
         raise RuntimeError(f"mcp-scanner {command} failed (exit {result.returncode}): {result.stderr.strip()}")
+    if "alignment check failed" in result.stderr or "APIError" in result.stderr:
+        raise RuntimeError(
+            f"mcp-scanner {command} exited 0 but LLM calls failed (check MCP_SCANNER_LLM_API_KEY / "
+            f"MCP_SCANNER_LLM_MODEL): {result.stderr[-1500:]}"
+        )
     return json.loads(result.stdout)
 
 
