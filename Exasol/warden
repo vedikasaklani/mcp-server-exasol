@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Launch the mcp-warden console.
+#
+# Runs unprivileged by default. gVisor's --rootless mode still enforces
+# the compiled seccomp filter and the declared-path-only mount table —
+# the two controls the security argument rests on, both proven per
+# container by the canary — but it cannot apply cgroup resource limits.
+#
+# Pass --root to run the fully confined configuration under sudo instead.
+# The toolchain usually lives under your home directory rather than in
+# sudo's secure_path, so PATH and the Go caches are passed through
+# explicitly; without that, root would refetch every module and then fail
+# to find `go` at all.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+USE_ROOT=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --root) USE_ROOT=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+
+USER_HOME="$(eval echo "~${SUDO_USER:-$USER}")"
+export PATH="$USER_HOME/.local/go/bin:$USER_HOME/.local/node/bin:$USER_HOME/.local/bin:$USER_HOME/go/bin:$PATH"
+export GOCACHE="${GOCACHE:-$USER_HOME/.cache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-$USER_HOME/go/pkg/mod}"
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "warden: no 'go' on PATH (looked in $USER_HOME/.local/go/bin)" >&2
+  exit 1
+fi
+if ! command -v runsc >/dev/null 2>&1; then
+  echo "warden: no 'runsc' on PATH — gVisor is required (looked in $USER_HOME/.local/bin)" >&2
+  exit 1
+fi
+
+BIN="${TMPDIR:-/tmp}/mcp-warden-console-bin/warden-console"
+mkdir -p "$(dirname "$BIN")"
+go build -o "$BIN" ./cmd/warden-console
+
+if [ "$USE_ROOT" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
+  echo "warden: --root given, re-running under sudo for cgroup limits"
+  exec sudo env \
+    "PATH=$PATH" "GOCACHE=$GOCACHE" "GOMODCACHE=$GOMODCACHE" \
+    "$BIN" "${ARGS[@]+"${ARGS[@]}"}"
+fi
+
+exec "$BIN" "${ARGS[@]+"${ARGS[@]}"}"
