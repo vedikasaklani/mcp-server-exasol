@@ -1,17 +1,18 @@
 '''Phase 1 building blocks: mechanical tool_declarations extraction (AST-only,
-never executes target code) and Semgrep pattern scanning. The manifest +
-manifest-history commit lives in onboard_services.update_manifest, called by
+never executes target code), Semgrep SAST pattern scanning, and Semgrep
+Supply Chain (SCA) dependency scanning. The manifest + manifest-history
+commit lives in onboard_services.update_manifest, called by
 record_rule_analysis_result - there is intentionally no commit path here.'''
 
 import ast
 import json
 import os
 import subprocess
+import tempfile
 
 _SKIP_DIRS = {".git", "venv", ".venv", "node_modules", "__pycache__", "dist", "build"}
 
 # Tool declaration extraction
-
 
 _TYPE_MAP = {
     "str": "string", "int": "integer", "float": "number",
@@ -21,9 +22,7 @@ _TYPE_MAP = {
 
 def extract_tool_declarations(repo_path: str) -> list[dict]:
     """Walks every .py file under repo_path and mechanically extracts tool
-    declarations exactly as written in source. Uses ast.parse only - never
-    imports or executes the target code, since this runs before any
-    sandboxing and the code may be malicious."""
+    declarations exactly as written in source."""
     declarations = []
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
@@ -35,7 +34,7 @@ def extract_tool_declarations(repo_path: str) -> list[dict]:
                 with open(filepath, "r", encoding="utf-8") as f:
                     tree = ast.parse(f.read(), filename=filepath)
             except (SyntaxError, UnicodeDecodeError):
-                continue  # unparsable file
+                continue  
             declarations.extend(_extract_from_tree(tree))
     return declarations
 
@@ -97,7 +96,7 @@ def _annotation_name(annotation) -> str:
     return "str"
 
 
-# Semgrep scan
+# Semgrep SAST scan
 
 def run_semgrep_scan(repo_path: str) -> list[dict]:
     """Runs Semgrep's community security rulesets (deterministic, no API
@@ -129,5 +128,74 @@ def run_semgrep_scan(repo_path: str) -> list[dict]:
             "line": r.get("start", {}).get("line"),
             "message": r.get("extra", {}).get("message"),
             "severity": severity_map.get(r.get("extra", {}).get("severity"), "LOW"),
+        })
+    return findings
+
+
+# Semgrep Supply Chain (SCA) scan
+
+_SCA_SEVERITY_MAP = {
+    "CRITICAL": "CRITICAL",
+    "HIGH": "HIGH",
+    "MODERATE": "MEDIUM",
+    "MEDIUM": "MEDIUM",
+    "LOW": "LOW",
+    "INFO": "LOW",
+}
+
+
+def run_semgrep_supply_chain_scan(repo_path: str) -> list[dict]:
+    """Semgrep Supply Chain (SCA): scans the repo's manifest/lockfile
+    against known-vulnerable and malicious open-source packages, with
+    reachability analysis (whether the vulnerable function is actually
+    called from this codebase, not just present as a dependency).
+    """
+    semgrep_bin = os.environ.get("SEMGREP_BIN", "semgrep")
+    fd, output_path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        cmd = [
+            semgrep_bin, "ci", "--supply-chain", "--dry-run",
+            "--json-output", output_path,
+            "--no-suppress-errors",
+        ]
+        result = subprocess.run(
+            cmd, cwd=repo_path, capture_output=True, text=True, timeout=300,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"semgrep ci --supply-chain failed (exit {result.returncode}): "
+                f"{result.stderr.strip()[-1500:]}"
+            )
+        with open(output_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    finally:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    findings = []
+    for r in raw.get("results", []):
+        extra = r.get("extra", {})
+        metadata = extra.get("metadata", {})
+        sca_info = extra.get("sca_info", {})
+        dep = sca_info.get("dependency_match", {}).get("found_dependency", {})
+        sca_severity = (metadata.get("sca-severity") or "").upper()
+        findings.append({
+            "rule_id": r.get("check_id"),
+            "file": r.get("path"),
+            "line": r.get("start", {}).get("line"),
+            "message": extra.get("message"),
+            "severity": _SCA_SEVERITY_MAP.get(sca_severity, "LOW"),
+            "analyzer": "semgrep_supply_chain",
+            "cve": metadata.get("cve") or metadata.get("sca-vuln-database-identifier"),
+            "package": dep.get("package"),
+            "package_version": dep.get("version"),
+            "ecosystem": dep.get("ecosystem"),
+            "transitivity": dep.get("transitivity"),   # "direct" | "transitive"
+            "reachable": sca_info.get("reachable"),      # bool
+            "fix_versions": metadata.get("sca-fix-versions", []),
         })
     return findings

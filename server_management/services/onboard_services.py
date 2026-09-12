@@ -1,11 +1,23 @@
 import re
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
 from server_management.database.db_models import (
-    Server, ServerManifest, ManifestHistory, ScanRun, LlmAnalysisResult, 
-    RuleAnalysisResult, LlmVerdict, RuleVerdict, ScanStatus
-    )
-from server_management.database.db_config import session as sessionlocal
+    LlmAnalysisResult,
+    LlmVerdict,
+    ManifestHistory,
+    RuleAnalysisResult,
+    RuleFinding,
+    RuleVerdict,
+    ScanRun,
+    ScanStatus,
+    Server,
+    ServerManifest,
+    ToolBehavioralFinding,
+    ToolDeclaration,
+)
+
 
 def normalize_repo_url(repo_url: str) -> str:
     """Extract 'owner/repo' from any GitHub URL format the user might type."""
@@ -74,12 +86,35 @@ def update_manifest(session: Session, server_id: str, *,
     return manifest
 
 
-def create_scan_run(server_id: str, commit_sha: str) -> ScanRun:
-    session=sessionlocal()
+def create_scan_run(session: Session, server_id: str, commit_sha: str) -> ScanRun:
     run = ScanRun(server_id=server_id, commit_sha=commit_sha, status=ScanStatus.QUEUED)
     session.add(run)
     session.commit()
     return run
+
+
+# Keys already given a real column on RuleFinding - anything else on the
+# finding dict is analyzer-specific and gets kept in `details` rather than
+# dropped. "message" and "threat_summary" are coalesced into one column,
+# so both are excluded here even though only one of them becomes a column.
+_RULE_FINDING_CORE_KEYS = {"rule_id", "file", "line", "message", "threat_summary", "severity", "analyzer", "tool_name"}
+
+
+def _rule_finding_kwargs(finding: dict) -> dict:
+    """Maps a Phase 1 finding dict onto RuleFinding's columns. Handles both
+    shapes that land in rule_findings: semgrep's file+line shape, and
+    Cisco's threat-based shape (from vulnerable-package, via the same
+    envelope Phase 2 uses)."""
+    details = {k: v for k, v in finding.items() if k not in _RULE_FINDING_CORE_KEYS}
+    return {
+        "analyzer": finding.get("analyzer", "unknown"),
+        "severity": finding.get("severity", "LOW"),
+        "rule_id": finding.get("rule_id"),
+        "file": finding.get("file"),
+        "line": finding.get("line"),
+        "message": finding.get("message") or finding.get("threat_summary"),
+        "details": details or None,
+    }
 
 
 def record_rule_analysis_result(
@@ -101,10 +136,27 @@ def record_rule_analysis_result(
     """
     session.add(RuleAnalysisResult(
         scan_run_id=scan_run_id, verdict=verdict,
-        rule_findings=rule_findings, tool_declarations=tool_declarations,
     ))
 
     run = session.get(ScanRun, scan_run_id)
+    if run is None:
+        raise ValueError(f"no scan run for scan_run_id={scan_run_id}")
+
+    for finding in rule_findings:
+        session.add(RuleFinding(
+            scan_run_id=scan_run_id,
+            server_id=run.server_id,
+            **_rule_finding_kwargs(finding),
+        ))
+
+    for declaration in tool_declarations:
+        session.add(ToolDeclaration(
+            scan_run_id=scan_run_id,
+            server_id=run.server_id,
+            name=declaration["name"],
+            description=declaration.get("description"),
+            parameter_schema=declaration.get("parameter_schema", {}),
+        ))
     if verdict == RuleVerdict.FAIL:
         run.status = ScanStatus.REJECTED
         run.finished_at = func.now()
@@ -139,12 +191,25 @@ def record_llm_analysis_result(
     Phase 2. Only valid to call once a RuleAnalysisResult with verdict != FAIL
     already exists for this scan_run"""
     run = session.get(ScanRun, scan_run_id)
+    if run is None:
+        raise ValueError(f"no scan run for scan_run_id={scan_run_id}")
     
 
     session.add(LlmAnalysisResult(
         scan_run_id=scan_run_id, verdict=verdict,
-        llm_findings=llm_findings,
     ))
+    for finding in llm_findings:
+        session.add(ToolBehavioralFinding(
+            scan_run_id=scan_run_id,
+            tool_name=finding.get("tool_name") or finding.get("tool") or finding.get("target", "unknown"),
+            analyzer=finding.get("analyzer", "behavioral_analyzer"),
+            severity=finding.get("severity", "LOW"),
+            threat_summary=finding.get("threat_summary"),
+            threat_names=finding.get("threat_names", []),
+            mcp_taxonomies=finding.get("mcp_taxonomies", []),
+            total_findings=finding.get("total_findings", 0),
+            target=finding.get("target"),
+        ))
 
     if verdict == LlmVerdict.FAIL:
         run.status = ScanStatus.REJECTED

@@ -8,28 +8,40 @@ Thin wrapper over the onboard_services.py:
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from sqlalchemy.orm import Session
 
-from server_management.database.db_models import (
-    Base, ScanRun,
+from server_management.api import githubapp
+from server_management.api.models import (
+    CreateScanRunRequest,
+    LlmAnalysisResultRequest,
+    ManifestResponse,
+    RegisterServerRequest,
+    RuleAnalysisResultRequest,
+    ScanRunResponse,
+    ServerResponse,
+    ToolDeclarationsResponse,
+    UpdateManifestRequest,
 )
-from server_management.services.onboard_services import(
-    register_server, get_manifest, update_manifest,
-    create_scan_run, record_rule_analysis_result, record_llm_analysis_result,
-    get_tool_declarations_for_llm_phase,
-)
-from server_management.api.models import (ServerResponse, ManifestResponse, 
-        ScanRunResponse, ToolDeclarationsResponse,RegisterServerRequest, UpdateManifestRequest
-        , CreateScanRunRequest, RuleAnalysisResultRequest, LlmAnalysisResultRequest)
 from server_management.database.db_config import get_db
-import server_management.api.githubapp as githubapp
-
-engine = create_engine("sqlite:///./registry.db")
-Base.metadata.create_all(engine)
-SessionLocal = sessionmaker(bind=engine)
+from server_management.database.db_models import (
+    ScanRun,
+)
+from server_management.services.onboard_services import (
+    create_scan_run,
+    get_manifest,
+    get_tool_declarations_for_llm_phase,
+    record_llm_analysis_result,
+    record_rule_analysis_result,
+    register_server,
+    update_manifest,
+)
+from server_management.services.sync import (
+    sync_latest_manifest_history,
+    sync_llm_phase_findings,
+    sync_rule_phase_findings,
+    sync_scan_run,
+)
 
 app = FastAPI()
 app.include_router(githubapp.router)
@@ -61,7 +73,10 @@ def api_get_manifest(server_id: str, db: Session = Depends(get_db)):
     )
 
 @app.patch("/servers/{server_id}/manifest", response_model=ManifestResponse)
-def api_update_manifest(server_id: str, req: UpdateManifestRequest, db: Session = Depends(get_db)):
+def api_update_manifest(
+    server_id: str, req: UpdateManifestRequest,
+    background_tasks: BackgroundTasks, db: Session = Depends(get_db),
+):
     try:
         manifest = update_manifest(
             db, server_id,
@@ -70,6 +85,7 @@ def api_update_manifest(server_id: str, req: UpdateManifestRequest, db: Session 
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="server not found")
+    background_tasks.add_task(sync_latest_manifest_history, db, server_id)
     return ManifestResponse(
         server_id=manifest.server_id,
         allowed_destinations=manifest.allowed_destinations,
@@ -101,7 +117,8 @@ def api_get_scan_run(scan_run_id: str, db: Session = Depends(get_db)):
 
 @app.post("/scan-runs/{scan_run_id}/rule-analysis-result", response_model=ScanRunResponse)
 def api_record_rule_analysis_result(
-    scan_run_id: str, req: RuleAnalysisResultRequest, db: Session = Depends(get_db)
+    scan_run_id: str, req: RuleAnalysisResultRequest,
+    background_tasks: BackgroundTasks, db: Session = Depends(get_db),
 ):
     """Called by the rule-analysis phase"""
     run = record_rule_analysis_result(
@@ -110,6 +127,13 @@ def api_record_rule_analysis_result(
         rule_findings=req.rule_findings,
         tool_declarations=req.tool_declarations,
     )
+    # Backgrounded so a slow/unreachable Exasol never blocks or fails this
+    # request - Postgres is already committed by the time this runs.
+    background_tasks.add_task(sync_rule_phase_findings, db, scan_run_id)
+    background_tasks.add_task(sync_scan_run, db, scan_run_id)
+    # Rule phase updates the manifest (tool_declarations) whenever verdict
+    # != FAIL - harmless no-op re-sync of the same latest version otherwise.
+    background_tasks.add_task(sync_latest_manifest_history, db, run.server_id)
     return ScanRunResponse(
         scan_run_id=run.scan_run_id, server_id=run.server_id,
         commit_sha=run.commit_sha, status=run.status,
@@ -132,7 +156,8 @@ def api_get_llm_phase_input(scan_run_id: str, db: Session = Depends(get_db)):
 
 @app.post("/scan-runs/{scan_run_id}/llm-analysis-result", response_model=ScanRunResponse)
 def api_record_llm_analysis_result(
-    scan_run_id: str, req: LlmAnalysisResultRequest, db: Session = Depends(get_db)
+    scan_run_id: str, req: LlmAnalysisResultRequest,
+    background_tasks: BackgroundTasks, db: Session = Depends(get_db),
 ):
     """Rejects with 409 if called before the rule phase"""
     try:
@@ -143,6 +168,8 @@ def api_record_llm_analysis_result(
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    background_tasks.add_task(sync_llm_phase_findings, db, scan_run_id)
+    background_tasks.add_task(sync_scan_run, db, scan_run_id)
     return ScanRunResponse(
         scan_run_id=run.scan_run_id, server_id=run.server_id,
         commit_sha=run.commit_sha, status=run.status,

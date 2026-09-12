@@ -3,19 +3,39 @@ Phase 2 (Cisco behavioral LLM analysis), unless Phase 1 already FAILed.'''
 '''Do not remove print lines, they are important for logging'''
 
 import asyncio
+import json
+import os
+import re
+import shutil
 import subprocess
 import tempfile
-import shutil
-import json
-import re
-import os
 
 from sqlalchemy import func
-from server_management.database.db_config import session as SessionLocal
-from server_management.database.db_models import Server, ScanRun, ScanStatus, RuleVerdict, LlmVerdict
+
 from server_management.api.github_auth import get_installation_token
-from server_management.services.onboard_services import record_rule_analysis_result, record_llm_analysis_result
-from server_management.services.static_analysis import extract_tool_declarations, run_semgrep_scan
+from server_management.database.db_config import session as SessionLocal
+from server_management.database.db_models import (
+    LlmVerdict,
+    RuleVerdict,
+    ScanRun,
+    ScanStatus,
+    Server,
+)
+from server_management.services.onboard_services import (
+    record_llm_analysis_result,
+    record_rule_analysis_result,
+)
+from server_management.services.static_analysis import (
+    extract_tool_declarations,
+    run_semgrep_scan,
+    run_semgrep_supply_chain_scan,
+)
+from server_management.services.sync import (
+    sync_latest_manifest_history,
+    sync_llm_phase_findings,
+    sync_rule_phase_findings,
+    sync_scan_run,
+)
 
 FAIL_SEVERITIES = {"CRITICAL", "HIGH"}
 
@@ -93,7 +113,11 @@ def _extract_findings(raw_result) -> list[dict]:
         analyzers = entry.get("findings", {})
         for analyzer_name, f in analyzers.items():
             if isinstance(f, dict) and f.get("total_findings", 0) > 0:
-                findings.append({**f, "analyzer": analyzer_name, "target": entry.get("package_name")})
+                findings.append({
+                    **f,
+                    "analyzer": analyzer_name,
+                    "tool_name": entry.get("tool_name"),
+                })
     return findings
 
 
@@ -138,6 +162,7 @@ async def trigger_scan(scan_run_id: str) -> None:
             rule_findings = _extract_findings(
                 await asyncio.to_thread(run_vulnerable_package_scan, repo_path))
             rule_findings += await asyncio.to_thread(run_semgrep_scan, repo_path)
+            rule_findings += await asyncio.to_thread(run_semgrep_supply_chain_scan, repo_path)
             tool_declarations = await asyncio.to_thread(extract_tool_declarations, repo_path)
         except Exception as e:
             await scan_fail(scan_run_id, reason=f"phase 1 scan failed: {e}")
@@ -161,6 +186,7 @@ async def trigger_scan(scan_run_id: str) -> None:
             await scan_fail(scan_run_id, reason=f"phase 1 recording failed: {e}")
             return
         db.close()
+        await asyncio.to_thread(_sync_rule_phase, scan_run_id, run.server_id)
         await scan_pass(scan_run_id, phase="rule", verdict=rule_verdict)
 
         if rule_verdict == RuleVerdict.FAIL:
@@ -193,6 +219,7 @@ async def trigger_scan(scan_run_id: str) -> None:
             await scan_fail(scan_run_id, reason=f"phase 2 recording failed: {e}")
             return
         db.close()
+        await asyncio.to_thread(_sync_llm_phase, scan_run_id)
         await scan_pass(scan_run_id, phase="llm", verdict=llm_verdict)
 
     finally:
@@ -200,8 +227,52 @@ async def trigger_scan(scan_run_id: str) -> None:
             shutil.rmtree(repo_path, ignore_errors=True)
 
 
+def _sync_scan_lifecycle(scan_run_id: str) -> None:
+    """Best-effort sync to Exasol's FACT_SCAN_RUN. This
+    runs outside the FastAPI layer, and
+    it's the only place FAILED status ever gets recorded - without this
+    hook, infra-level failures (clone failed, token exchange failed, a
+    phase throwing before it ever reaches record_*_analysis_result) were
+    invisible in Exasol even though api.py's endpoints cover REJECTED and
+    the PASSED transitions. Swallow errors: a down Exasol should never take
+    the scan pipeline down with it."""
+    db = SessionLocal()
+    try:
+        sync_scan_run(db, scan_run_id)
+    except Exception as e:
+        print(f"exasol scan-lifecycle sync failed for {scan_run_id}: {e}")
+    finally:
+        db.close()
+
+
+def _sync_rule_phase(scan_run_id: str, server_id: str) -> None:
+    """Best-effort sync for rule findings and the manifest after a commit."""
+    db = SessionLocal()
+    try:
+        sync_rule_phase_findings(db, scan_run_id)
+        sync_scan_run(db, scan_run_id)
+        sync_latest_manifest_history(db, server_id)
+    except Exception as e:
+        print(f"exasol rule-phase sync failed for {scan_run_id}: {e}")
+    finally:
+        db.close()
+
+
+def _sync_llm_phase(scan_run_id: str) -> None:
+    """Best-effort sync for LLM findings after a commit."""
+    db = SessionLocal()
+    try:
+        sync_llm_phase_findings(db, scan_run_id)
+        sync_scan_run(db, scan_run_id)
+    except Exception as e:
+        print(f"exasol llm-phase sync failed for {scan_run_id}: {e}")
+    finally:
+        db.close()
+
+
 async def scan_pass(scan_run_id: str, phase: str, verdict) -> None:
     print(f"scan has passed... [{phase}] {scan_run_id}: verdict={verdict}")
+    await asyncio.to_thread(_sync_scan_lifecycle, scan_run_id)
 
 
 async def scan_fail(scan_run_id: str, reason: str) -> None:
@@ -216,3 +287,4 @@ async def scan_fail(scan_run_id: str, reason: str) -> None:
             db.commit()
     finally:
         db.close()
+    await asyncio.to_thread(_sync_scan_lifecycle, scan_run_id)

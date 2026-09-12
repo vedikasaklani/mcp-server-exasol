@@ -1,21 +1,25 @@
-import hmac
-import hashlib
-import os
 import asyncio
+import hashlib
+import hmac
+import logging
+import os
 import traceback
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from server_management.api.models import RegisterServerRequest
 from server_management.database.db_config import get_db
 from server_management.services.onboard_services import (
-    register_server, create_scan_run, get_server_by_repo_and_installation,
+    create_scan_run,
+    get_server_by_repo_and_installation,
+    register_server,
 )
-from server_management.api.models import RegisterServerRequest
-from fastapi.responses import HTMLResponse
 from server_management.services.scan_pipeline import trigger_scan
 
 router = APIRouter(prefix="/github")
+logger = logging.getLogger(__name__)
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 
@@ -52,13 +56,16 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
     _verify_signature(body, request.headers.get("X-Hub-Signature-256"))
 
     if request.headers.get("X-GitHub-Event") != "push":
+        logger.info("Ignoring GitHub webhook: event is not push")
         return {"status": "ignored"}
 
     payload = await request.json()
 
     if payload.get("ref") != "refs/heads/main":
+        logger.info("Ignoring GitHub webhook: ref is not main")
         return {"status": "ignored", "reason": "not main branch"}
     if payload.get("deleted"):
+        logger.info("Ignoring GitHub webhook: branch was deleted")
         return {"status": "ignored", "reason": "branch deleted"}
 
     installation_id = payload["installation"]["id"]
@@ -67,9 +74,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
 
     server = get_server_by_repo_and_installation(db, repo_url, installation_id)
     if server is None:
+        logger.warning(
+            "Ignoring GitHub webhook: no registered server for repo=%s installation_id=%s",
+            repo_url,
+            installation_id,
+        )
         return {"status": "ignored", "reason": "unregistered server"}
-    run=create_scan_run(server_id=server.server_id, commit_sha=commit_sha)
+    run = create_scan_run(db, server_id=server.server_id, commit_sha=commit_sha)
     background_tasks.add_task(_run_scan_background, run.scan_run_id)
+    logger.info("Background scan task added: scan_run_id=%s", run.scan_run_id)
     print(f"Background to trigger scan added {run.scan_run_id}", flush=True)
     return {"status": "accepted"}
 

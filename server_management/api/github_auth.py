@@ -1,14 +1,15 @@
-import time
 import os
-import jwt
+import time
+
 import httpx
-from cryptography.hazmat.primitives import serialization
+import jwt
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
 
 GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
 GITHUB_PRIVATE_KEY = os.environ["GITHUB_PRIVATE_KEY"]
 
-"""this is a specific fix to prevent mismatch of github key and stored key in render env"""
+"""this is a specific fix to prevent mismatch of github key and stored .pem key"""
 def _load_private_key() -> bytes:
     """
     Load GitHub private key from environment and normalize for JWT signing.
@@ -24,9 +25,9 @@ def _load_private_key() -> bytes:
 
     # Step 2: Normalize escaped sequences to actual newlines
     key = key.replace("\\n", "\n")
-    key = key.replace("\\r\\n", "\n")  # Handle Windows line endings
-    key = key.replace("\\r", "")        # Remove any remaining carriage returns
-    key = key.replace("\\t", "\t")      # In case tabs got escaped
+    key = key.replace("\\r\\n", "\n") 
+    key = key.replace("\\r", "")       
+    key = key.replace("\\t", "\t")     
 
     # Step 3: Clean up whitespace and ensure PEM markers
     key = key.strip()
@@ -66,7 +67,7 @@ def _load_private_key() -> bytes:
         )
     except Exception as e:
         raise ValueError(
-            f"Failed to load PEM key: {str(e)}. "
+            f"Failed to load PEM key: {e!s}. "
             f"Key format is invalid after normalization."
         ) from e
 
@@ -80,7 +81,7 @@ def generate_app_jwt() -> str:
     """
     now = int(time.time())
     payload = {
-        "iat": now - 60,        # Issued at (leeway for clock skew)
+        "iat": now - 60,        # Issued at 
         "exp": now + 9 * 60,    # Expires in 9 minutes
         "iss": GITHUB_APP_ID,   # GitHub App ID
     }
@@ -92,7 +93,7 @@ def generate_app_jwt() -> str:
     except ValueError as e:
         # Re-raise with context about what went wrong
         raise RuntimeError(
-            f"Failed to generate JWT: {str(e)}. "
+            f"Failed to generate JWT: {e!s}. "
             f"Check GITHUB_PRIVATE_KEY environment variable."
         ) from e
 

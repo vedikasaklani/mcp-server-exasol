@@ -91,12 +91,14 @@ platformdirs==4.11.7
 propcache==0.5.2
 protobuf==6.33.6
 psycopg2-binary==2.9.12
+pyexasol==2.4.0
 py-key-value-aio==0.4.5
 py_rust_stemmers==0.1.8
 pycparser==3.0
 pydantic==2.13.5
 pydantic-settings==2.15.0
 pydantic_core==2.46.5
+pyexasol==2.4.0
 Pygments==2.21.0
 pyjson5==2.0.1
 PyJWT==2.13.0
