@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
-from server_management.api import githubapp
+from server_management.api import frontend, githubapp
 from server_management.api.models import (
     CreateScanRunRequest,
     LlmAnalysisResultRequest,
@@ -31,6 +31,7 @@ from server_management.services.onboard_services import (
     create_scan_run,
     get_manifest,
     get_tool_declarations_for_llm_phase,
+    mark_interrupted_scans_failed,
     record_llm_analysis_result,
     record_rule_analysis_result,
     register_server,
@@ -45,6 +46,18 @@ from server_management.services.sync import (
 
 app = FastAPI()
 app.include_router(githubapp.router)
+app.include_router(frontend.router)
+
+
+@app.on_event("startup")
+def recover_interrupted_scans():
+    db = next(get_db())
+    try:
+        mark_interrupted_scans_failed(db)
+    finally:
+        db.close()
+
+
 #for operators
 @app.post("/servers", response_model=ServerResponse)
 def api_register_server(req: RegisterServerRequest, db: Session = Depends(get_db)):
@@ -127,8 +140,6 @@ def api_record_rule_analysis_result(
         rule_findings=req.rule_findings,
         tool_declarations=req.tool_declarations,
     )
-    # Backgrounded so a slow/unreachable Exasol never blocks or fails this
-    # request - Postgres is already committed by the time this runs.
     background_tasks.add_task(sync_rule_phase_findings, db, scan_run_id)
     background_tasks.add_task(sync_scan_run, db, scan_run_id)
     # Rule phase updates the manifest (tool_declarations) whenever verdict

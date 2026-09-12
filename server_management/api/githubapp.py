@@ -18,7 +18,7 @@ from server_management.services.onboard_services import (
 )
 from server_management.services.scan_pipeline import trigger_scan
 
-router = APIRouter(prefix="/github")
+router = APIRouter(prefix="/github", tags=["github"])
 logger = logging.getLogger(__name__)
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]

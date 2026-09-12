@@ -18,6 +18,34 @@ from server_management.database.db_models import (
     ToolDeclaration,
 )
 
+_TERMINAL_SCAN_STATUSES = {
+    ScanStatus.REJECTED,
+    ScanStatus.COMPLETE,
+    ScanStatus.FAILED,
+}
+_ACTIVE_SCAN_STATUSES = {
+    ScanStatus.PULLING_CODE,
+    ScanStatus.RULE_ANALYSIS_RUNNING,
+    ScanStatus.LLM_ANALYSIS_RUNNING,
+}
+
+
+def mark_interrupted_scans_failed(session: Session) -> int:
+    """Close scans orphaned when the process stopped during a scan."""
+    updated = (
+        session.query(ScanRun)
+        .filter(ScanRun.status.in_(_ACTIVE_SCAN_STATUSES))
+        .update(
+            {
+                ScanRun.status: ScanStatus.FAILED,
+                ScanRun.finished_at: func.now(),
+            },
+            synchronize_session=False,
+        )
+    )
+    session.commit()
+    return updated
+
 
 def normalize_repo_url(repo_url: str) -> str:
     """Extract 'owner/repo' from any GitHub URL format the user might type."""
@@ -49,6 +77,182 @@ def register_server(session: Session, repo_url: str, installation_id: int,
 
 def get_manifest(session: Session, server_id: str) -> ServerManifest | None:
     return session.get(ServerManifest, server_id)
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _scan_verdict(run: ScanRun) -> str | None:
+    if run.llm_result is not None:
+        return run.llm_result.verdict.value
+    if run.rule_result is not None:
+        return run.rule_result.verdict.value
+    return None
+
+
+def _score_placeholder() -> dict:
+    # Trust scores are currently calculated in Exasol, not exposed through the
+    # operational PostgreSQL API yet.
+    return {
+        "overall_score": None,
+        "security_score": None,
+        "operational_score": None,
+        "computed_at": None,
+    }
+
+
+def _tools_for_scan(run: ScanRun) -> list[dict]:
+    if run.rule_result is None:
+        return []
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameter_schema": tool.parameter_schema or {},
+        }
+        for tool in run.rule_result.tool_declarations
+    ]
+
+
+def _tools_from_manifest(manifest: ServerManifest | None) -> list[dict]:
+    if manifest is None or not manifest.tool_declarations:
+        return []
+    return [
+        {
+            "name": tool["name"],
+            "description": tool.get("description"),
+            "parameter_schema": tool.get("parameter_schema", {}),
+        }
+        for tool in manifest.tool_declarations
+    ]
+
+
+def _findings_for_scan(run: ScanRun) -> list[dict]:
+    findings = []
+    if run.rule_result is not None:
+        findings.extend(
+            {
+                "id": finding.id,
+                "phase": "rule",
+                "tool_name": None,
+                "analyzer": finding.analyzer,
+                "severity": finding.severity,
+                "message": finding.message,
+                "details": finding.details,
+                "file": finding.file,
+                "line": finding.line,
+            }
+            for finding in run.rule_result.rule_findings
+        )
+    if run.llm_result is not None:
+        findings.extend(
+            {
+                "id": finding.id,
+                "phase": "llm",
+                "tool_name": finding.tool_name,
+                "analyzer": finding.analyzer,
+                "severity": finding.severity,
+                "message": finding.threat_summary,
+                "details": {
+                    "threat_names": finding.threat_names or [],
+                    "mcp_taxonomies": finding.mcp_taxonomies or [],
+                    "total_findings": finding.total_findings,
+                    "target": finding.target,
+                },
+                "file": None,
+                "line": None,
+            }
+            for finding in run.llm_result.tool_findings
+        )
+    return findings
+
+
+def _scan_summary(run: ScanRun) -> dict:
+    return {
+        "scan_run_id": run.scan_run_id,
+        "commit_sha": run.commit_sha,
+        "status": run.status,
+        "started_at": _iso(run.started_at),
+        "finished_at": _iso(run.finished_at),
+        "verdict": _scan_verdict(run),
+        "score": _score_placeholder(),
+    }
+
+
+def get_server_dashboard(session: Session, server_id: str) -> dict | None:
+    server = session.get(Server, server_id)
+    if server is None:
+        return None
+
+    latest_scan = (
+        session.query(ScanRun)
+        .filter(ScanRun.server_id == server_id)
+        .order_by(ScanRun.started_at.desc())
+        .first()
+    )
+    manifest = server.manifest
+    return {
+        "server_id": server.server_id,
+        "repo_url": server.repo_url,
+        "registered_at": _iso(server.created_at),
+        "allowed_destinations": (manifest.allowed_destinations if manifest else []),
+        "current_verdict": _scan_verdict(latest_scan) if latest_scan else None,
+        "scan_in_progress": bool(
+            latest_scan and latest_scan.status not in _TERMINAL_SCAN_STATUSES
+        ),
+        "latest_scan_id": latest_scan.scan_run_id if latest_scan else None,
+        "latest_scan_date": _iso(latest_scan.started_at) if latest_scan else None,
+        "commit_sha": latest_scan.commit_sha if latest_scan else None,
+        "score": _score_placeholder(),
+        "tools": _tools_from_manifest(manifest),
+        "findings": _findings_for_scan(latest_scan) if latest_scan else [],
+    }
+
+
+def get_server_scan_history(
+    session: Session, server_id: str
+) -> list[dict] | None:
+    if session.get(Server, server_id) is None:
+        return None
+    runs = (
+        session.query(ScanRun)
+        .filter(ScanRun.server_id == server_id)
+        .order_by(ScanRun.started_at.desc())
+        .all()
+    )
+    return [_scan_summary(run) for run in runs]
+
+
+def get_server_scan_detail(
+    session: Session, server_id: str, scan_id: str
+) -> dict | None:
+    run = (
+        session.query(ScanRun)
+        .filter(ScanRun.server_id == server_id, ScanRun.scan_run_id == scan_id)
+        .first()
+    )
+    if run is None:
+        return None
+    return {
+        "scan_id": scan_id,
+        "server_id": server_id,
+        "repo_url": run.server.repo_url,
+        "registered_at": _iso(run.server.created_at),
+        "allowed_destinations": (
+            run.server.manifest.allowed_destinations
+            if run.server.manifest
+            else []
+        ),
+        "current_verdict": _scan_verdict(run),
+        "scan_in_progress": run.status not in _TERMINAL_SCAN_STATUSES,
+        "latest_scan_id": run.scan_run_id,
+        "latest_scan_date": _iso(run.started_at),
+        "commit_sha": run.commit_sha,
+        "score": _score_placeholder(),
+        "tools": _tools_for_scan(run),
+        "findings": _findings_for_scan(run),
+    }
 
 
 def get_server_by_repo_and_installation(session:Session, repo_url:str, installation_id:int):

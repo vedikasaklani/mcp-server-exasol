@@ -128,6 +128,7 @@ def run_semgrep_scan(repo_path: str) -> list[dict]:
             "line": r.get("start", {}).get("line"),
             "message": r.get("extra", {}).get("message"),
             "severity": severity_map.get(r.get("extra", {}).get("severity"), "LOW"),
+            "analyzer": "semgrep",
         })
     return findings
 
@@ -159,9 +160,15 @@ def run_semgrep_supply_chain_scan(repo_path: str) -> list[dict]:
             "--json-output", output_path,
             "--no-suppress-errors",
         ]
-        result = subprocess.run(
-            cmd, cwd=repo_path, capture_output=True, text=True, timeout=300,
-        )
+        timeout = int(os.environ.get("SEMGREP_SCA_TIMEOUT_SECONDS", "60"))
+        try:
+            result = subprocess.run(
+                cmd, cwd=repo_path, capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"semgrep supply-chain scan timed out after {timeout} seconds"
+            ) from exc
 
         if result.returncode != 0:
             raise RuntimeError(
@@ -189,7 +196,7 @@ def run_semgrep_supply_chain_scan(repo_path: str) -> list[dict]:
             "line": r.get("start", {}).get("line"),
             "message": extra.get("message"),
             "severity": _SCA_SEVERITY_MAP.get(sca_severity, "LOW"),
-            "analyzer": "semgrep_supply_chain",
+            "analyzer": "semgrep-sca",
             "cve": metadata.get("cve") or metadata.get("sca-vuln-database-identifier"),
             "package": dep.get("package"),
             "package_version": dep.get("version"),
