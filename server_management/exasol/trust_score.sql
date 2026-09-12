@@ -9,7 +9,7 @@
 -- TUNABLES (all in one place, adjust and re-run):
 --   static/behavioral half-life  : 45 days  - code-level posture is slow-moving
 --   runtime half-life            : 3 days   - operational health is volatile
---   severity weights             : CRITICAL 40 / HIGH 20 / MEDIUM 8 / LOW 2
+--   severity weights             : SEV_CRITICAL 40 / SEV_HIGH 20 / SEV_MEDIUM 8 / SEV_LOW 2
 --   reachable multiplier (SCA)   : 2x  - a called vulnerable function beats
 --                                        an uncalled transitive one
 --   destination-violation weight : 3x on the violation rate
@@ -31,10 +31,10 @@ WITH static_weighted AS (
         f.SERVER_ID,
         SUM(
             (CASE UPPER(f.SEVERITY)
-                WHEN 'CRITICAL' THEN 40
-                WHEN 'HIGH'     THEN 20
-                WHEN 'MEDIUM'   THEN 8
-                WHEN 'LOW'      THEN 2
+                WHEN 'SEV_CRITICAL' THEN 40
+                WHEN 'SEV_HIGH'     THEN 20
+                WHEN 'SEV_MEDIUM'   THEN 8
+                WHEN 'SEV_LOW'      THEN 2
                 ELSE 0
              END)
             * (CASE WHEN f.REACHABLE = TRUE THEN 2 ELSE 1 END)

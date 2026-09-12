@@ -28,6 +28,7 @@ from server_management.database.db_models import (
     ToolBehavioralFinding,
     ToolDeclaration,
 )
+from server_management.services.runtime_telemetry import resolve_server
 
 SCHEMA = "MCP_ANALYTICS"
 
@@ -61,7 +62,10 @@ def _date_key(dt) -> int:
     return int(dt.strftime("%Y%m%d"))
 
 
-def _ensure_dim_server(exa: pyexasol.ExaConnection, server: Server) -> None:
+def _ensure_dim_server(exa: pyexasol.ExaConnection, server: Server) -> str:
+    # Exasol identity is keyed by the same normalized repository identity used
+    # by runtime telemetry, rather than by the PostgreSQL UUID.
+    canonical_id = resolve_server(server.repo_url, "github", "", exa=exa)
     exa.execute(
         """
         MERGE INTO DIM_SERVER t
@@ -72,12 +76,13 @@ def _ensure_dim_server(exa: pyexasol.ExaConnection, server: Server) -> None:
         VALUES (s.SERVER_ID, s.REPO_URL, s.INSTALLATION_ID, s.REGISTERED_AT)
         """,
         {
-            "server_id": server.server_id,
+            "server_id": canonical_id,
             "repo_url": server.repo_url,
             "installation_id": server.installation_id,
             "registered_at": server.created_at,
         },
     )
+    return canonical_id
 
 
 def _get_or_create_tool_key(
@@ -142,14 +147,14 @@ def sync_rule_phase_findings(pg_session: Session, scan_run_id: str) -> None:
 
     exa = _connect()
     try:
-        _ensure_dim_server(exa, server)
+        canonical_id = _ensure_dim_server(exa, server)
         date_key = _date_key(result.reviewed_at)
 
         # ToolDeclaration rows register the server's tools in dim_tool even
         # though RuleFinding itself (file/line-based, not tool-name-based)
         # never sets TOOL_KEY - that stays NULL for rule-phase findings.
         for t in tools:
-            _get_or_create_tool_key(exa, t.server_id, t.name, scan_run_id)
+            _get_or_create_tool_key(exa, canonical_id, t.name, scan_run_id)
 
         rows = []
         for f in findings:
@@ -157,7 +162,7 @@ def sync_rule_phase_findings(pg_session: Session, scan_run_id: str) -> None:
             details_json = f.details  # already a dict from Postgres JSON column
             reachable = details_json.get("reachable") if isinstance(details_json, dict) else None
             rows.append((
-                "rule_finding", f.id, scan_run_id, f.server_id, None, analyzer_key,
+                "rule_finding", f.id, scan_run_id, canonical_id, None, analyzer_key,
                 date_key, "rule", f.severity, reachable, f.message,
                 json.dumps(details_json) if details_json else None,
             ))
@@ -183,6 +188,7 @@ def sync_scan_run(pg_session: Session, scan_run_id: str) -> None:
 
     exa = _connect()
     try:
+        canonical_id = resolve_server(run.server.repo_url, "github", "", exa=exa)
         exa.execute(
             """
             MERGE INTO FACT_SCAN_RUN t
@@ -207,7 +213,7 @@ def sync_scan_run(pg_session: Session, scan_run_id: str) -> None:
             """,
             {
                 "scan_run_id": scan_run_id,
-                "server_id": run.server_id,
+                "server_id": canonical_id,
                 "commit_sha": run.commit_sha,
                 "status": run.status.value,
                 "rule_verdict": rule_result.verdict.value if rule_result else None,
@@ -236,9 +242,13 @@ def sync_latest_manifest_history(pg_session: Session, server_id: str) -> None:
     )
     if history is None:
         return
+    server = pg_session.get(Server, history.server_id)
+    if server is None:
+        return
 
     exa = _connect()
     try:
+        canonical_id = resolve_server(server.repo_url, "github", "", exa=exa)
         exa.execute(
             """
             MERGE INTO FACT_MANIFEST_HISTORY t
@@ -254,7 +264,7 @@ def sync_latest_manifest_history(pg_session: Session, server_id: str) -> None:
             )
             """,
             {
-                "server_id": history.server_id,
+                "server_id": canonical_id,
                 "version": history.version,
                 "allowed_destinations": json.dumps(history.allowed_destinations),
                 "change_reason": history.change_reason,
@@ -274,10 +284,11 @@ def sync_llm_phase_findings(pg_session: Session, scan_run_id: str) -> None:
 
     exa = _connect()
     try:
+        canonical_id = resolve_server(run.server.repo_url, "github", "", exa=exa)
         date_key = _date_key(result.reviewed_at)
         rows = []
         for f in findings:
-            tool_key = _get_or_create_tool_key(exa, run.server_id, f.tool_name, scan_run_id)
+            tool_key = _get_or_create_tool_key(exa, canonical_id, f.tool_name, scan_run_id)
             analyzer_key = _get_or_create_analyzer_key(exa, f.analyzer)
             details = json.dumps({
                 "threat_names": f.threat_names,
@@ -286,7 +297,7 @@ def sync_llm_phase_findings(pg_session: Session, scan_run_id: str) -> None:
                 "target": f.target,
             })
             rows.append((
-                "tool_behavioral_finding", f.id, scan_run_id, run.server_id, tool_key,
+                "tool_behavioral_finding", f.id, scan_run_id, canonical_id, tool_key,
                 analyzer_key, date_key, "llm", f.severity, None, f.threat_summary, details,
             ))
         _flush_to_fact_table(exa, rows)

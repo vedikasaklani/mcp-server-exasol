@@ -23,6 +23,10 @@ The Exasol integration is currently focused on:
   daily `FACT_TRUST_SCORE` rollup.
 - [`server_management/services/sync.py`](server_management/services/sync.py):
   Postgres-to-Exasol synchronization functions.
+- [`server_management/services/runtime_telemetry.py`](server_management/services/runtime_telemetry.py):
+  Postgres-free runtime proxy telemetry persistence and Exasol reads.
+- [`server_management/api/telemetry_api.py`](server_management/api/telemetry_api.py):
+  Dedicated HTTP contract used by the Go proxy in `Exasol/`.
 - [`server_management/services/scan_pipeline.py`](server_management/services/scan_pipeline.py):
   direct in-process scan execution and its Exasol sync trigger points.
 - [`server_management/api/api.py`](server_management/api/api.py):
@@ -72,6 +76,8 @@ Facts:
   `DETAILS`.
 - `FACT_RUNTIME_EVENTS`: proxy call audit data. This is landed directly from
   the runtime/egress path rather than copied from PostgreSQL.
+- `FACT_RUNTIME_FINDINGS` and `FACT_SESSION`: runtime detector findings and
+  completed proxy-session summaries, also landed through the telemetry API.
 - `FACT_SCAN_RUN`: one upserted row per scan run, including status and phase
   verdicts. This keeps rejected and infrastructure-failed scans visible even
   when they have no findings.
@@ -107,6 +113,17 @@ settings from the process environment. It provides:
   and duration into `FACT_SCAN_RUN`.
 - `sync_latest_manifest_history`: merges the latest PostgreSQL manifest-history
   version into Exasol.
+
+The standalone runtime path uses
+`server_management.api.telemetry_api:app`. It deliberately does not import
+the PostgreSQL session setup: the proxy can resolve a server and write
+runtime events, findings, tools, and sessions when PostgreSQL is unavailable.
+Runtime event upserts are keyed by the proxy's stable
+`<session>:<request>` event ID, so fire-and-forget retries do not duplicate
+calls. The same telemetry router is included in `server_management.api.api`
+so the normal application exposes both API surfaces on one port. Run the
+standalone telemetry app on a separate port only for a PostgreSQL-free
+deployment.
 
 The API path schedules these functions as FastAPI background tasks after the
 corresponding PostgreSQL result call. The direct pipeline path is equally
@@ -196,3 +213,128 @@ check PostgreSQL state, then retry or replay the analytical load deliberately.
 - The trust-score SQL is a policy artifact: changes to weights, half-lives, or
   score blending should be reviewed as product/data-contract changes, not
   treated as incidental query refactors.
+
+## Warden/Exasol boundary
+
+The `Exasol/` directory is not another MCP server that the registry scans.
+It is the Go security runtime that can launch a separate MCP server command,
+confine it with gVisor/runsc, drive MCP JSON-RPC requests, observe its
+behaviour, and publish telemetry. The Python `server_management` application
+owns registration, GitHub scanning, PostgreSQL workflow state, and the HTTP
+telemetry contract. Exasol stores the analytical copy of the resulting facts.
+
+The supported runtime path is:
+
+```text
+registered source
+  -> static scan and capability profile
+  -> reviewed/approved profile
+  -> warden launches the target MCP command
+  -> client or test driver sends MCP requests through warden
+  -> warden observes the confined process
+  -> telemetry API writes Exasol facts
+```
+
+Warden does not monitor arbitrary host processes, Docker containers started
+independently with `docker run`, or a server that receives no request. It is
+not a passive network scanner. For a private or stdio MCP server, this is
+expected: warden must own the process and either receive requests through its
+HTTP `/rpc` endpoint, use the console, or drive a request file.
+
+## What warden does before live traffic
+
+Warden has two distinct execution phases:
+
+1. **Learning/profile phase.** `warden-observe` or `warden-launch` runs the
+   target without the final enforcement policy and records observed syscalls,
+   filesystem paths, network dials, process activity, and MCP responses. The
+   request set matters: the default handshake and `tools/list` exercise only
+   startup/discovery. They do not prove that every tool or code path was
+   exercised.
+2. **Enforcing/live phase.** An approved capability profile is compiled into
+   confinement rules. `warden-serve` keeps a pool of confined target
+   instances, exposes `/rpc`, and attributes observations to each completed
+   MCP request. `warden-run` is a finite request-replay command; it is useful
+   for tests, not a persistent gateway.
+
+The learning phase is not a proof of safety. It is a measurement pass used to
+build a candidate profile. It can miss code paths and, depending on its
+network-mode configuration, may run with network access. The profile requires
+approval before the strict enforcing commands accept it. The `warden-launch`
+fast path intentionally auto-approves and should not be treated as a
+production approval workflow.
+
+## What can be extracted
+
+For each observed or completed request, the runtime can collect:
+
+- MCP method/tool name, request identity, response size, latency, failure and
+  denial outcome;
+- syscalls and denied operations;
+- filesystem paths and read/write byte counts;
+- network destinations, dial attempts, and network byte counts;
+- process spawns and unexpected execution;
+- response secret/injection pattern hits;
+- declared-versus-actual network destination comparisons;
+- session-level totals and behavioural findings;
+- discovered tool names, descriptions, and parameter schemas.
+
+The telemetry API maps these to `DIM_TOOL`, `FACT_RUNTIME_EVENTS`,
+`FACT_RUNTIME_FINDINGS`, and `FACT_SESSION`. Static analysis separately writes
+`FACT_STATIC_FINDINGS`, scan lifecycle rows, and manifest history.
+
+Some fields are intentionally unavailable in the current integration:
+
+- no caller/agent identity (`AGENT_ID` is null);
+- no intent decision (`INTENT_MATCH` is null);
+- no automatic retries within a request (`RETRY_COUNT` is zero);
+- no runtime data when no request reaches the warden;
+- no guarantee that an unexercised tool or branch is safe;
+- no automatic Docker-container interception.
+
+Per-call trace counters can be temporarily unknown because gVisor trace output
+is asynchronous. The final session summary is the more reliable aggregate.
+
+## What the existing tests prove
+
+The Go tests are primarily unit and package-integration tests. They validate
+policy compilation, profile generation and approval rules, request attribution,
+descriptor/path accounting, syscall and network detectors, audit-chain
+integrity, pool lifecycle, registry HTTP delivery, and runsc bundle/hardening
+behaviour. The malicious fixture tests exercise expected refusals and
+findings.
+
+They do not prove that a real registered GitHub server is continuously
+reachable through a production client, that every tool was exercised, or that
+Docker traffic is intercepted. A real end-to-end telemetry check requires:
+
+1. an approved profile;
+2. a running telemetry API with valid Exasol credentials;
+3. a warden-owned target process;
+4. at least one real `tools/call` request;
+5. an Exasol query against `FACT_RUNTIME_EVENTS`.
+
+## Session lifecycle integration
+
+Registration and static scanning identify a server, but registration alone
+does not bypass approval. The session manager reconciles a registered server
+after registration and after scan transitions; it starts nothing until a
+human-approved profile, matching approved commit, accepted source tree, and
+structured launch specification all exist. Once eligible, it owns one
+long-lived `warden-serve` process per server. A newly approved commit replaces
+the previous process; a launch-spec edit clears approval and stops the
+process. Starting a new session for every tool call is incorrect.
+
+Approval is a domain event, not merely a process flag: the manifest records
+the profile path, approver, approval timestamp, and approved commit so the
+trust view can explain which artifact is running. The API exposes this
+metadata and provides an explicit Warden-profile approval operation. Missing
+host configuration or missing source/profile artifacts causes reconciliation
+to fail visibly rather than silently launching an unconfined process.
+
+The launch specification must be structured executable plus arguments, not an
+HTTP string passed through `shell=True` or `split()`. Repository registration
+currently stores repository identity and allowed destinations, not a complete
+runtime command or approved profile. That missing data is the integration seam
+the runner must address before it can safely launch arbitrary registered
+servers.

@@ -1,4 +1,7 @@
 import re
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -48,14 +51,27 @@ def mark_interrupted_scans_failed(session: Session) -> int:
 
 
 def normalize_repo_url(repo_url: str) -> str:
-    """Extract 'owner/repo' from any GitHub URL format the user might type."""
-    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$", repo_url.strip())
-    if not match:
+    """Return a canonical lowercase ``owner/repo`` for GitHub URL variants."""
+    value = repo_url.strip()
+    if value.startswith("git@github.com:"):
+        path = value.removeprefix("git@github.com:")
+    else:
+        parsed = urlparse(value if "://" in value else f"https://{value}")
+        if parsed.hostname != "github.com":
+            raise ValueError(f"Could not parse GitHub repo URL: {repo_url}")
+        path = parsed.path
+    path = path.strip().strip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4]
+    parts = [part for part in path.split("/") if part]
+    if len(parts) != 2 or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
         raise ValueError(f"Could not parse GitHub repo URL: {repo_url}")
-    return match.group(1).lower()
+    return "/".join(part.lower() for part in parts)
 
 def register_server(session: Session, repo_url: str, installation_id: int,
-                     allowed_destinations: list[str]) -> Server:
+                     allowed_destinations: list[str],
+                     launch_executable: str = "",
+                     launch_args: list[str] | None = None) -> Server:
     server = Server(repo_url=normalize_repo_url(repo_url), installation_id=installation_id)
     session.add(server)
     session.flush() 
@@ -64,6 +80,8 @@ def register_server(session: Session, repo_url: str, installation_id: int,
         server_id=server.server_id,
         allowed_destinations=allowed_destinations,
         tool_declarations=None,   #unknown until first static analysis pass extracts it
+        launch_executable=launch_executable.strip() or None,
+        launch_args=launch_args or [],
         version=1,
     ))
     session.add(ManifestHistory(
@@ -207,6 +225,11 @@ def get_server_dashboard(session: Session, server_id: str) -> dict | None:
         "score": _score_placeholder(),
         "tools": _tools_from_manifest(manifest),
         "findings": _findings_for_scan(latest_scan) if latest_scan else [],
+        "warden_profile": {
+            "approved_by": manifest.warden_approved_by if manifest else None,
+            "approved_at": _iso(manifest.warden_approved_at) if manifest else None,
+            "approved_commit": manifest.warden_approved_commit if manifest else None,
+        },
     }
 
 
@@ -269,6 +292,8 @@ def get_server_by_repo_and_installation(session:Session, repo_url:str, installat
 def update_manifest(session: Session, server_id: str, *,
                      allowed_destinations: list[str] | None = None,
                      tool_declarations: list[dict] | None = None,
+                     launch_executable: str | None = None,
+                     launch_args: list[str] | None = None,
                      change_reason: str) -> ServerManifest:
     manifest = session.get(ServerManifest, server_id)
     if manifest is None:
@@ -278,6 +303,15 @@ def update_manifest(session: Session, server_id: str, *,
         manifest.allowed_destinations = allowed_destinations
     if tool_declarations is not None:
         manifest.tool_declarations = tool_declarations
+    if launch_executable is not None:
+        manifest.launch_executable = launch_executable.strip() or None
+    if launch_args is not None:
+        manifest.launch_args = launch_args
+    if launch_executable is not None or launch_args is not None:
+        manifest.warden_profile_path = None
+        manifest.warden_approved_by = None
+        manifest.warden_approved_at = None
+        manifest.warden_approved_commit = None
     manifest.version += 1
 
     session.add(ManifestHistory(
@@ -285,6 +319,37 @@ def update_manifest(session: Session, server_id: str, *,
         allowed_destinations=manifest.allowed_destinations,
         tool_declarations=manifest.tool_declarations,
         change_reason=change_reason,
+    ))
+    session.commit()
+    return manifest
+
+
+def approve_warden_profile(
+    session: Session,
+    server_id: str,
+    *,
+    profile_path: str,
+    approved_by: str,
+    commit_sha: str,
+) -> ServerManifest:
+    manifest = session.get(ServerManifest, server_id)
+    if manifest is None:
+        raise ValueError(f"no manifest for server_id={server_id}")
+    if not approved_by.strip() or not commit_sha.strip():
+        raise ValueError("approved_by and commit_sha are required")
+    path = Path(profile_path).expanduser()
+    if not path.is_file():
+        raise ValueError(f"Warden profile does not exist: {path}")
+    manifest.warden_profile_path = str(path.resolve())
+    manifest.warden_approved_by = approved_by.strip()
+    manifest.warden_approved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    manifest.warden_approved_commit = commit_sha.strip()
+    manifest.version += 1
+    session.add(ManifestHistory(
+        server_id=server_id, version=manifest.version,
+        allowed_destinations=manifest.allowed_destinations,
+        tool_declarations=manifest.tool_declarations,
+        change_reason="warden_profile_approved",
     ))
     session.commit()
     return manifest

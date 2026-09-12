@@ -49,6 +49,7 @@ import (
 	"mcp-warden/sandbox/metrics"
 	"mcp-warden/sandbox/pool"
 	"mcp-warden/sandbox/profile"
+	"mcp-warden/sandbox/registry"
 	"mcp-warden/sandbox/runtime"
 	"mcp-warden/sandbox/runtime/runsc"
 )
@@ -95,6 +96,7 @@ func run(args []string) error {
 	noHandshake := fs.Bool("no-handshake", false, "skip the MCP initialize/tools-list handshake on each new container")
 	live := fs.Bool("live", false, "render a live terminal dashboard and keep running until interrupted")
 	refresh := fs.Duration("refresh", time.Second, "live dashboard refresh interval")
+	telemetryAPI := fs.String("telemetry-api", os.Getenv("EXASOL_TELEMETRY_API"), "telemetry API base URL (empty disables runtime storage)")
 	cwd := fs.String("cwd", "", "working directory for the confined process inside the guest (default: none)")
 	drivePath := fs.String("drive", "", "replay this newline-delimited JSON-RPC file against the server on a loop")
 	driveRate := fs.Float64("rate", 2, "requests per second when -drive is set")
@@ -172,6 +174,7 @@ func run(args []string) error {
 	if sess == "" {
 		sess = newSessionID()
 	}
+	startedAt := time.Now()
 
 	var auditLog *audit.Log
 	if *auditPath != "" {
@@ -200,6 +203,29 @@ func run(args []string) error {
 		OnFinding:                 func(id string, f analyze.Finding) { obs.OnFinding(id, f) },
 	})
 	obs = bridge.New(mon, auditLog)
+	storage := registry.New(*telemetryAPI)
+	if storage.Enabled() {
+		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		source := os.Getenv("WARDEN_SERVER_SOURCE")
+		if source == "" {
+			source = command[0]
+		}
+		serverID := storage.ResolveAs(
+			resolveCtx, source, "command", "", os.Getenv("WARDEN_SERVER_ID"),
+		)
+		resolveCancel()
+		if serverID != "" {
+			obs.Storage = storage
+			obs.ServerID = serverID
+			obs.SessionID = sess
+			obs.Networks = baseline.Network
+			fmt.Printf("telemetry enabled: server_id=%s\n", serverID)
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"telemetry unavailable at %s for source %q; runtime events will not be stored\n",
+				*telemetryAPI, source)
+		}
+	}
 
 	// Measure what is actually going to run, before anything runs. This
 	// is the only check that can fail before a single request is served,
@@ -354,6 +380,24 @@ func run(args []string) error {
 	final := mon.Score()
 	finalSnap := mon.Aggregate()
 	finalFindings := mon.Findings()
+	if obs.Storage != nil {
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := obs.Storage.Wait(drainCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "telemetry drain:", err)
+		}
+		drainCancel()
+		confinement := "enforcing"
+		if os.Geteuid() != 0 {
+			confinement = "rootless-no-cgroups"
+		}
+		var auditEntries int64
+		if auditLog != nil {
+			auditEntries = auditLog.Stats().Written
+		}
+		if err := obs.PostSession(shutCtx, startedAt, confinement, auditEntries); err != nil {
+			fmt.Fprintln(os.Stderr, "telemetry session:", err)
+		}
+	}
 	mon.Close()
 
 	if auditLog != nil {

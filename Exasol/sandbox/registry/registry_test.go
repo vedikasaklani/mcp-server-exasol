@@ -98,6 +98,25 @@ func TestResolveParsesServerID(t *testing.T) {
 	}
 }
 
+func TestResolveAsSendsCanonicalServerID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["canonical_server_id"] != "pg-server-1" {
+			t.Fatalf("canonical_server_id = %q, want pg-server-1", body["canonical_server_id"])
+		}
+		json.NewEncoder(w).Encode(map[string]string{"server_id": body["canonical_server_id"]})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	if id := c.ResolveAs(context.Background(), "repo", "command", "", "pg-server-1"); id != "pg-server-1" {
+		t.Fatalf("ResolveAs = %q, want pg-server-1", id)
+	}
+}
+
 func TestPostSessionIsSynchronousAndSurfacesErrors(t *testing.T) {
 	// The session summary is the one write with no second chance — it is
 	// sent while the console is tearing down — so unlike the others it

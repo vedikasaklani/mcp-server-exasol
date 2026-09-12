@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,7 @@ import (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	pending sync.WaitGroup
 	// unreachable latches true after the first failed call, so a service
 	// that never starts doesn't cost every subsequent request a timeout.
 	// Resolve clears it on success, so a service that comes up later is
@@ -267,11 +269,33 @@ func (c *Client) postAsync(path string, body any) {
 	if !c.Enabled() {
 		return
 	}
+	c.pending.Add(1)
 	go func() {
+		defer c.pending.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = c.post(ctx, path, body, nil)
 	}()
+}
+
+// Wait drains writes started before the call. The runtime path remains
+// fire-and-forget for request latency, while session shutdown gets a bounded
+// opportunity to deliver events before the process exits.
+func (c *Client) Wait(ctx context.Context) error {
+	if c == nil || !c.Enabled() {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		c.pending.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Resolve gets or creates a server_id for source (a git URL, "npm:<pkg>",
@@ -280,15 +304,28 @@ func (c *Client) postAsync(path string, body any) {
 // error) if the service is unreachable, in which case the caller should
 // treat this session as having storage disabled rather than fail the load.
 func (c *Client) Resolve(ctx context.Context, source, kind, ref string) string {
+	return c.resolve(ctx, source, kind, ref, "")
+}
+
+// ResolveAs resolves telemetry using an externally owned canonical identity,
+// such as the PostgreSQL server_id. This keeps static and runtime facts
+// joinable instead of creating a second identity from the source string.
+func (c *Client) ResolveAs(ctx context.Context, source, kind, ref, canonicalID string) string {
+	return c.resolve(ctx, source, kind, ref, canonicalID)
+}
+
+func (c *Client) resolve(ctx context.Context, source, kind, ref, canonicalID string) string {
 	if !c.Enabled() {
 		return ""
 	}
 	var out struct {
 		ServerID string `json:"server_id"`
 	}
-	if err := c.post(ctx, "/servers/resolve", map[string]string{
-		"source": source, "kind": kind, "ref": ref,
-	}, &out); err != nil {
+	body := map[string]string{"source": source, "kind": kind, "ref": ref}
+	if canonicalID != "" {
+		body["canonical_server_id"] = canonicalID
+	}
+	if err := c.post(ctx, "/servers/resolve", body, &out); err != nil {
 		return ""
 	}
 	return out.ServerID

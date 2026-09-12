@@ -29,6 +29,10 @@ set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
+PROJECT_ROOT="$(cd .. && pwd)"
+API_URL="${EXASOL_TELEMETRY_API:-http://127.0.0.1:8000}"
+API_AUTOSTART="${WARDEN_TELEMETRY_AUTOSTART:-1}"
+TELEMETRY_PID=""
 
 WRITE_PATHS=(); REQ_FILE=""; RATE=2; POOL=2; OUT=""; AUTO_YES=0; PROFILE_IN=""
 while getopts "w:r:n:p:o:f:yh" opt; do
@@ -54,11 +58,22 @@ if [[ $# -eq 0 ]]; then
 fi
 SERVER_CMD=("$@")
 
+bold() { printf '\033[1m%s\033[0m\n' "$1"; }
+dim()  { printf '\033[2m%s\033[0m\n' "$1"; }
+warn() { printf '\033[33m%s\033[0m\n' "$1"; }
+die()  { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
+
 if [[ $EUID -ne 0 ]]; then
   echo "This needs root: runsc creates sandboxes and cgroups." >&2
   echo "Re-run as:  sudo $0 ${*@Q}" >&2
   exit 1
 fi
+
+case "${SERVER_CMD[0]}" in
+  docker|docker.exe|podman|podman.exe)
+    die "container runtimes bypass warden monitoring; run the MCP server command/image through this script instead of 'docker run'"
+    ;;
+esac
 
 command -v runsc >/dev/null || { echo "runsc not found on PATH" >&2; exit 1; }
 command -v go    >/dev/null || { echo "go not found on PATH" >&2; exit 1; }
@@ -67,13 +82,34 @@ if [[ -n "$OUT" ]]; then mkdir -p "$OUT"; WORK="$OUT"; KEEP=1
 else WORK="$(mktemp -d /tmp/warden-watch-XXXXXX)"; KEEP=0; fi
 BIN="$WORK/bin"; mkdir -p "$BIN"
 
-bold() { printf '\033[1m%s\033[0m\n' "$1"; }
-dim()  { printf '\033[2m%s\033[0m\n' "$1"; }
-warn() { printf '\033[33m%s\033[0m\n' "$1"; }
-die()  { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
-
-cleanup() { [[ $KEEP -eq 0 ]] && rm -rf "$WORK"; }
+cleanup() {
+  if [[ -n "$TELEMETRY_PID" ]]; then
+    kill "$TELEMETRY_PID" 2>/dev/null || true
+    wait "$TELEMETRY_PID" 2>/dev/null || true
+  fi
+  [[ $KEEP -eq 0 ]] && rm -rf "$WORK"
+}
 trap cleanup EXIT
+
+if [[ "$API_AUTOSTART" == "1" ]] && ! curl --silent --fail --max-time 2 "$API_URL/health" >/dev/null 2>&1; then
+  command -v python3 >/dev/null || die "telemetry API is unavailable at $API_URL and python3 was not found"
+  API_HOST="${API_URL#*://}"
+  API_HOST="${API_HOST%%:*}"
+  API_PORT="${API_URL##*:}"
+  (
+    cd "$PROJECT_ROOT"
+    exec python3 -m uvicorn server_management.api.telemetry_api:app \
+      --host "$API_HOST" --port "$API_PORT"
+  ) &
+  TELEMETRY_PID=$!
+  for _ in {1..30}; do
+    curl --silent --fail --max-time 2 "$API_URL/health" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl --silent --fail --max-time 2 "$API_URL/health" >/dev/null 2>&1 ||
+    die "telemetry API failed to start at $API_URL"
+fi
+export EXASOL_TELEMETRY_API="$API_URL"
 
 # ---------------------------------------------------------------- build
 bold "building warden"
@@ -185,6 +221,7 @@ sleep 1
 "$BIN/warden-serve" \
   -profile "$APPROVED" -probe "$BIN/probe" \
   -pool "$POOL" -analyze detect -audit "$AUDIT" \
+  -telemetry-api "$API_URL" \
   -live -drive "$REQ_FILE" -rate "$RATE" \
   -- "${SERVER_CMD[@]}"
 STATUS=$?

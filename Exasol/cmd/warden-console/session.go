@@ -419,7 +419,9 @@ func (c *console) load(ctx context.Context, spec string, args []string, opts loa
 	s.mon.SetEntrypoint(analyze.MeasureEntrypoint(ep.Command[0]))
 
 	if c.storage.Enabled() {
-		s.serverID = c.storage.Resolve(ctx, spec, ep.Kind, s.ref)
+		s.serverID = c.storage.ResolveAs(
+			ctx, spec, ep.Kind, s.ref, os.Getenv("WARDEN_SERVER_ID"),
+		)
 		if s.serverID != "" {
 			obs.Storage = c.storage
 			obs.ServerID = s.serverID
@@ -488,6 +490,11 @@ func (s *session) close(ctx context.Context) {
 	if s.pool != nil {
 		if err := s.pool.Close(ctx); err != nil {
 			fail("pool shutdown: %v", err)
+		}
+	}
+	if c := s.obs; c != nil && c.Storage != nil {
+		if err := c.Storage.Wait(ctx); err != nil {
+			detail("runtime telemetry drain incomplete: %v", err)
 		}
 	}
 	if s.mon != nil {
@@ -670,7 +677,9 @@ func (c *console) runSAST(source, kind, srcDir, ref string) {
 		tools[i] = registry.ToolInfo{Name: t.Name, Description: t.Description, ParameterSchema: t.ParameterSchema}
 	}
 
-	serverID := c.storage.Resolve(context.Background(), source, kind, ref)
+	serverID := c.storage.ResolveAs(
+		context.Background(), source, kind, ref, os.Getenv("WARDEN_SERVER_ID"),
+	)
 	if serverID != "" {
 		c.storage.PostSASTFindings(serverID, findings, tools, ref)
 	}

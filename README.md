@@ -132,6 +132,8 @@ The Exasol schema is `MCP_ANALYTICS`.
 - `FACT_STATIC_FINDINGS`: rule and behavioral findings. `PHASE` distinguishes
   `rule` and `llm`.
 - `FACT_RUNTIME_EVENTS`: runtime proxy or egress events.
+- `FACT_RUNTIME_FINDINGS`: detector findings emitted by the runtime proxy.
+- `FACT_SESSION`: completed proxy-session summaries.
 - `FACT_SCAN_RUN`: scan status, verdicts, timestamps, and duration.
 - `FACT_MANIFEST_HISTORY`: immutable manifest-version records.
 - `FACT_TRUST_SCORE`: daily scores intended for dashboards.
@@ -163,6 +165,35 @@ MCP_SCANNER_ENDPOINT
 SEMGREP_APP_TOKEN
 ```
 
+### Runtime telemetry API
+
+The Go proxy in [`Exasol/`](Exasol/) sends runtime data to the telemetry
+routes included in the main API:
+
+```powershell
+uvicorn server_management.api.api:app --host 0.0.0.0 --port 8000
+```
+
+The main API now exposes the telemetry routes alongside the existing
+registration and scan routes: `/health`,
+`/servers/resolve`, runtime event/finding/session writes and reads,
+`/servers/{server_id}/tools`, `/servers/{server_id}/trust-score`, and
+`/compute-scores`. Runtime event writes are idempotent by `event_id`, so the
+proxy can retry delivery safely. Keep this API on a private network; do not
+expose Exasol port `8563` publicly.
+
+For a PostgreSQL-free telemetry-only deployment, run the standalone app on a
+different port:
+
+```powershell
+uvicorn server_management.api.telemetry_api:app --host 0.0.0.0 --port 8001
+```
+
+When the telemetry API runs on the Windows host, use an Exasol DSN reachable
+from the host (typically `localhost`). Use `host.docker.internal` only when
+the API process itself runs inside Docker; that hostname is not guaranteed to
+resolve from a host PowerShell process.
+
 For local Docker Desktop development, the API container cannot use
 `localhost` to reach Exasol running in another container or on the host.
 Use `host.docker.internal` when Exasol is exposed through Docker Desktop:
@@ -173,6 +204,113 @@ EXASOL_DSN=host.docker.internal/<fingerprint>:8563
 
 For a non-containerized local API, `localhost/<fingerprint>:8563` can be used
 when Exasol is listening on the local machine.
+
+`Exasol/scripts/watch.sh` starts the telemetry API automatically when
+`/health` is unavailable, then passes its URL to `warden-serve`. Set
+`WARDEN_TELEMETRY_AUTOSTART=0` when the API is managed separately. Runtime
+events are sent asynchronously during calls and drained during shutdown so a
+short live run does not lose its final events.
+
+The telemetry path only observes requests that pass through warden:
+
+```text
+MCP client -> warden-console or warden-serve/watch.sh -> MCP server -> telemetry API -> Exasol
+```
+
+Starting the MCP image separately with `docker run` does not attach it to this
+path and cannot populate `FACT_RUNTIME_EVENTS`. The warden launcher executes
+the server command it owns; it is not a Docker-container activity collector.
+For a runtime smoke test, provide a request file containing at least one real
+tool call (not only `initialize` or `tools/list`) and launch the server with
+`Exasol/scripts/watch.sh`. After the call completes, verify delivery with:
+
+```sql
+SELECT SERVER_ID, EVENT_ID, TOOL_NAME, EVENT_TS, DECISION, STATUS_CODE
+FROM MCP_ANALYTICS.FACT_RUNTIME_EVENTS
+ORDER BY EVENT_TS DESC
+LIMIT 20;
+```
+
+The warden process prints either `telemetry enabled: server_id=...` or a
+diagnostic containing the telemetry URL and source when server resolution
+fails. If the latter appears, fix the API/Exasol configuration before
+checking the fact table.
+
+### Registered server launch specification
+
+The registration form accepts the executable and arguments that Warden is
+allowed to launch. The values are stored on `server_manifests` as
+`launch_executable` and `launch_args`; they are data, not a shell command.
+For example:
+
+```json
+{
+  "launch_executable": "python3",
+  "launch_args": ["-m", "my_mcp_server"]
+}
+```
+
+Apply the migration before registering or updating launch specifications:
+
+```powershell
+alembic upgrade head
+```
+
+To make runtime and static Exasol facts use the same repository identity,
+start Warden with the registered canonical repository source:
+
+```bash
+export WARDEN_SERVER_SOURCE="owner/repository"
+```
+
+The static sync path resolves that same source with `kind=github`. Do not use
+the arbitrary executable string as the Warden source when validating the
+identity join.
+
+### Approval-gated long-lived Warden sessions
+
+The Python service owns one `warden-serve` process per registered server. It
+reconciles after registration, after a scan reaches `STATIC_ANALYSIS_PASSED`,
+and after profile approval. Registration by itself never launches a process.
+The manager requires all of the following:
+
+- a non-empty manifest launch executable and arguments;
+- a scan at an eligible status with an accepted source tree under
+  `WARDEN_SOURCE_ROOT/<postgres-server-id>/<scan-run-id>`;
+- a profile file explicitly approved for that scan's commit;
+- `WARDEN_SERVE_BIN` and `WARDEN_PROBE_BIN` configured on the API host.
+
+Configure the API host (the host with `runsc` and the Warden binaries):
+
+```bash
+export WARDEN_SOURCE_ROOT=/var/lib/mcp-warden/source
+export WARDEN_SERVE_BIN=/opt/mcp-warden/warden-serve
+export WARDEN_PROBE_BIN=/opt/mcp-warden/probe
+export WARDEN_PORT_BASE=18000
+```
+
+After the learning run produces a candidate profile and a human reviews it,
+record the approval for the exact commit:
+
+```bash
+curl -X POST http://127.0.0.1:8000/servers/<server-id>/warden/approve \
+  -H 'Content-Type: application/json' \
+  -d '{"profile_path":"/var/lib/mcp-warden/profiles/<server-id>.json",
+       "approved_by":"alice@example.com",
+       "commit_sha":"<scanned-commit>"}'
+```
+
+The response and the frontend server overview expose the approver, timestamp,
+and approved commit. A later commit does not automatically reuse the old
+approval: the old session may continue serving, but the new artifact is not
+started until its profile is approved. Editing the launch specification clears
+approval and stops the existing session.
+
+The scan pipeline deletes its temporary clone as before. To retain a
+successful Phase 1 tree for a later `warden load path:` run, set
+`WARDEN_SOURCE_ROOT` to a dedicated directory. The copy is made only after a
+non-rejected static verdict and excludes `.git` so clone credentials cannot be
+carried into the warden tree.
 
 
 ## Local setup

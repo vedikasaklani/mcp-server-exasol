@@ -5,17 +5,20 @@ import logging
 import os
 import traceback
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from server_management.api.models import RegisterServerRequest
-from server_management.database.db_config import get_db
+from server_management.database.db_config import get_db, session as SessionLocal
 from server_management.services.onboard_services import (
     create_scan_run,
     get_server_by_repo_and_installation,
     register_server,
+    normalize_repo_url,
 )
+from server_management.api.github_auth import get_installation_token
 from server_management.services.scan_pipeline import trigger_scan
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -24,13 +27,58 @@ logger = logging.getLogger(__name__)
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 
 
+async def start_initial_scan(
+    server_id: str, repo_url: str, installation_id: int
+) -> None:
+    try:
+        owner_repo = normalize_repo_url(repo_url)
+        token = await get_installation_token(installation_id)
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            timeout=20,
+        ) as client:
+            response = await client.get(f"/repos/{owner_repo}/commits", params={"per_page": 1})
+            response.raise_for_status()
+            commits = response.json()
+        if not commits or not commits[0].get("sha"):
+            raise RuntimeError("GitHub returned no commit for the repository default branch")
+
+        db = SessionLocal()
+        try:
+            run = create_scan_run(db, server_id=server_id, commit_sha=commits[0]["sha"])
+        finally:
+            db.close()
+        print(f"BACKGROUND INITIAL SCAN STARTING: {run.scan_run_id}", flush=True)
+        await trigger_scan(run.scan_run_id)
+        print(f"BACKGROUND INITIAL SCAN FINISHED: {run.scan_run_id}", flush=True)
+    except Exception:
+        logger.exception("Initial scan could not start for server_id=%s", server_id)
+
+
 @router.post("/register")
-def github_register(req: RegisterServerRequest, db: Session = Depends(get_db)):
+async def github_register(
+    req: RegisterServerRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     server = register_server(
         db, repo_url=req.repo_url,
         installation_id=req.installation_id,
         allowed_destinations=req.allowed_destinations,
+        launch_executable=req.launch_executable,
+        launch_args=req.launch_args,
     )
+    background_tasks.add_task(
+        start_initial_scan,
+        server.server_id,
+        server.repo_url,
+        server.installation_id,
+    )
+    logger.info("Registered server_id=%s; initial scan scheduled", server.server_id)
     return {"server_id": server.server_id}
 
 
@@ -102,6 +150,10 @@ def github_setup(request: Request):
         <input type="text" id="repo_url" placeholder="https://github.com/you/repo.git" style="width:100%" required><br><br>
         <label>Allowed destinations (comma-separated)</label><br>
         <input type="text" id="allowed_destinations" placeholder="api.example.com, api.stripe.com" style="width:100%" required><br><br>
+        <label>Executable</label><br>
+        <input type="text" id="launch_executable" placeholder="python3" style="width:100%" required><br><br>
+        <label>Arguments (one per line)</label><br>
+        <textarea id="launch_args" placeholder="-m&#10;my_mcp_server" style="width:100%"></textarea><br><br>
         <button type="submit">Register</button>
       </form>
       <p id="result"></p>
@@ -113,6 +165,9 @@ def github_setup(request: Request):
             installation_id: parseInt(document.getElementById('installation_id').value),
             allowed_destinations: document.getElementById('allowed_destinations').value
               .split(',').map(s => s.trim()).filter(Boolean),
+            launch_executable: document.getElementById('launch_executable').value.trim(),
+            launch_args: document.getElementById('launch_args').value
+              .split('\\n').map(s => s.trim()).filter(Boolean),
           }};
           const resp = await fetch('/github/register', {{
             method: 'POST',

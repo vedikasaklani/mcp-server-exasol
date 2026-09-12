@@ -36,6 +36,7 @@ from server_management.services.sync import (
     sync_rule_phase_findings,
     sync_scan_run,
 )
+from server_management.services.warden_session_manager import warden_sessions
 
 FAIL_SEVERITIES = {"CRITICAL", "HIGH"}
 
@@ -74,6 +75,29 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
         detail = e.stderr if isinstance(e, subprocess.CalledProcessError) else str(e)
         raise RuntimeError(f"git clone/checkout failed: {_sanitize(detail)}") from e
     return workdir
+
+
+def preserve_for_warden(repo_path: str, server_id: str, scan_run_id: str) -> str | None:
+    """Copy an accepted scan tree into the configured warden source root.
+
+    The clone remains disposable and its .git directory is never copied,
+    because the clone's origin may contain the installation token. Retention
+    is opt-in: without WARDEN_SOURCE_ROOT the normal cleanup behavior is
+    unchanged.
+    """
+    root = os.environ.get("WARDEN_SOURCE_ROOT")
+    if not root:
+        return None
+    safe_server = re.sub(r"[^A-Za-z0-9_.-]", "_", server_id)
+    safe_run = re.sub(r"[^A-Za-z0-9_.-]", "_", scan_run_id)
+    destination = os.path.join(os.path.abspath(root), safe_server, safe_run)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    shutil.copytree(
+        repo_path,
+        destination,
+        ignore=shutil.ignore_patterns(".git"),
+    )
+    return destination
 
 
 def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
@@ -202,6 +226,15 @@ async def trigger_scan(scan_run_id: str) -> None:
             print(f"scan {scan_run_id} REJECTED at phase 1 - phase 2 skipped")
             return
 
+        try:
+            preserved = await asyncio.to_thread(
+                preserve_for_warden, repo_path, run.server_id, scan_run_id
+            )
+            if preserved:
+                print(f"accepted source copied for warden: {preserved}")
+        except OSError as e:
+            print(f"warden source copy failed for {scan_run_id}; discarding clone: {e}")
+
         # Phase 2: Cisco behavioral (LLM)
         _set_status(scan_run_id, ScanStatus.LLM_ANALYSIS_RUNNING)
         try:
@@ -286,6 +319,19 @@ def _sync_llm_phase(scan_run_id: str) -> None:
 async def scan_pass(scan_run_id: str, phase: str, verdict) -> None:
     print(f"scan has passed... [{phase}] {scan_run_id}: verdict={verdict}")
     await asyncio.to_thread(_sync_scan_lifecycle, scan_run_id)
+    if phase == "llm":
+        await asyncio.to_thread(warden_sessions.reconcile_server, _server_id_for_scan(scan_run_id))
+
+
+def _server_id_for_scan(scan_run_id: str) -> str:
+    db = SessionLocal()
+    try:
+        run = db.get(ScanRun, scan_run_id)
+        if run is None:
+            raise RuntimeError(f"scan run not found: {scan_run_id}")
+        return run.server_id
+    finally:
+        db.close()
 
 
 async def scan_fail(scan_run_id: str, reason: str) -> None:

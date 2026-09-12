@@ -74,6 +74,12 @@ class ServerManifest(Base):
     server_id = Column(String, ForeignKey("servers.server_id"), primary_key=True)
     allowed_destinations = Column(JSON, nullable=False, default=list)   # operator-declared at registration
     tool_declarations = Column(JSON, nullable=True)                     # NOT set at registration populated by static analysis 
+    launch_executable = Column(String, nullable=True)
+    launch_args = Column(JSON, nullable=False, default=list)
+    warden_profile_path = Column(String, nullable=True)
+    warden_approved_by = Column(String, nullable=True)
+    warden_approved_at = Column(DateTime, nullable=True)
+    warden_approved_commit = Column(String, nullable=True)
                                                                          
     version = Column(Integer, nullable=False, default=1)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

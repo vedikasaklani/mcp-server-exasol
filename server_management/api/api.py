@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
 from server_management.api import frontend, githubapp
+from server_management.api.telemetry_api import router as telemetry_router
 from server_management.api.models import (
     CreateScanRunRequest,
     LlmAnalysisResultRequest,
@@ -22,6 +23,7 @@ from server_management.api.models import (
     ServerResponse,
     ToolDeclarationsResponse,
     UpdateManifestRequest,
+    ApproveWardenProfileRequest,
 )
 from server_management.database.db_config import get_db
 from server_management.database.db_models import (
@@ -36,7 +38,9 @@ from server_management.services.onboard_services import (
     record_rule_analysis_result,
     register_server,
     update_manifest,
+    approve_warden_profile,
 )
+from server_management.services.warden_session_manager import warden_sessions
 from server_management.services.sync import (
     sync_latest_manifest_history,
     sync_llm_phase_findings,
@@ -47,6 +51,7 @@ from server_management.services.sync import (
 app = FastAPI()
 app.include_router(githubapp.router)
 app.include_router(frontend.router)
+app.include_router(telemetry_router)
 
 
 @app.on_event("startup")
@@ -56,16 +61,30 @@ def recover_interrupted_scans():
         mark_interrupted_scans_failed(db)
     finally:
         db.close()
+    warden_sessions.reconcile_all()
 
 
 #for operators
 @app.post("/servers", response_model=ServerResponse)
-def api_register_server(req: RegisterServerRequest, db: Session = Depends(get_db)):
+def api_register_server(
+    req: RegisterServerRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     server = register_server(
         db, repo_url=req.repo_url,
         installation_id=req.installation_id,
         allowed_destinations=req.allowed_destinations,
+        launch_executable=req.launch_executable,
+        launch_args=req.launch_args,
     )
+    background_tasks.add_task(
+        githubapp.start_initial_scan,
+        server.server_id,
+        server.repo_url,
+        server.installation_id,
+    )
+    background_tasks.add_task(warden_sessions.reconcile_server, server.server_id)
     return ServerResponse(
         server_id=server.server_id,
         repo_url=server.repo_url,
@@ -83,6 +102,12 @@ def api_get_manifest(server_id: str, db: Session = Depends(get_db)):
         allowed_destinations=manifest.allowed_destinations,
         tool_declarations=manifest.tool_declarations,
         version=manifest.version,
+        launch_executable=manifest.launch_executable,
+        launch_args=manifest.launch_args or [],
+        warden_profile_path=manifest.warden_profile_path,
+        warden_approved_by=manifest.warden_approved_by,
+        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
+        warden_approved_commit=manifest.warden_approved_commit,
     )
 
 @app.patch("/servers/{server_id}/manifest", response_model=ManifestResponse)
@@ -94,16 +119,58 @@ def api_update_manifest(
         manifest = update_manifest(
             db, server_id,
             allowed_destinations=req.allowed_destinations,
+            launch_executable=req.launch_executable,
+            launch_args=req.launch_args,
             change_reason="operator_edit",
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="server not found")
+    if req.launch_executable is not None or req.launch_args is not None:
+        background_tasks.add_task(warden_sessions.stop_server, server_id)
     background_tasks.add_task(sync_latest_manifest_history, db, server_id)
     return ManifestResponse(
         server_id=manifest.server_id,
         allowed_destinations=manifest.allowed_destinations,
         tool_declarations=manifest.tool_declarations,
         version=manifest.version,
+        launch_executable=manifest.launch_executable,
+        launch_args=manifest.launch_args or [],
+        warden_profile_path=manifest.warden_profile_path,
+        warden_approved_by=manifest.warden_approved_by,
+        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
+        warden_approved_commit=manifest.warden_approved_commit,
+    )
+
+
+@app.post("/servers/{server_id}/warden/approve", response_model=ManifestResponse)
+def api_approve_warden_profile(
+    server_id: str,
+    req: ApproveWardenProfileRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        manifest = approve_warden_profile(
+            db,
+            server_id,
+            profile_path=req.profile_path,
+            approved_by=req.approved_by,
+            commit_sha=req.commit_sha,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    background_tasks.add_task(warden_sessions.reconcile_server, server_id)
+    return ManifestResponse(
+        server_id=manifest.server_id,
+        allowed_destinations=manifest.allowed_destinations,
+        tool_declarations=manifest.tool_declarations,
+        version=manifest.version,
+        launch_executable=manifest.launch_executable,
+        launch_args=manifest.launch_args or [],
+        warden_profile_path=manifest.warden_profile_path,
+        warden_approved_by=manifest.warden_approved_by,
+        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
+        warden_approved_commit=manifest.warden_approved_commit,
     )
 
 

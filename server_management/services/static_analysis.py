@@ -152,6 +152,12 @@ def run_semgrep_supply_chain_scan(repo_path: str) -> list[dict]:
     called from this codebase, not just present as a dependency).
     """
     semgrep_bin = os.environ.get("SEMGREP_BIN", "semgrep")
+    semgrep_app_token = os.environ.get("SEMGREP_APP_TOKEN")
+    if not semgrep_app_token:
+        raise RuntimeError(
+            "SEMGREP_APP_TOKEN is required for Semgrep supply-chain scans"
+        )
+
     fd, output_path = tempfile.mkstemp(suffix=".json")
     os.close(fd)
     try:
@@ -160,10 +166,17 @@ def run_semgrep_supply_chain_scan(repo_path: str) -> list[dict]:
             "--json-output", output_path,
             "--no-suppress-errors",
         ]
+        env = os.environ.copy()
+        env["SEMGREP_APP_TOKEN"] = semgrep_app_token
         timeout = int(os.environ.get("SEMGREP_SCA_TIMEOUT_SECONDS", "60"))
         try:
             result = subprocess.run(
-                cmd, cwd=repo_path, capture_output=True, text=True, timeout=timeout,
+                cmd,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(

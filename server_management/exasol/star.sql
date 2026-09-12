@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS FACT_STATIC_FINDINGS (
 -- landed directly here (not sourced from Postgres) - see the field
 -- rationale from the earlier audit-log design discussion.
 CREATE TABLE IF NOT EXISTS FACT_RUNTIME_EVENTS (
-    EVENT_ID                   VARCHAR(36)   NOT NULL,
+    EVENT_ID                   VARCHAR(255)  NOT NULL,
     SERVER_ID                  VARCHAR(36)   NOT NULL,
     TOOL_KEY                   INT,
     AGENT_ID                   VARCHAR(255),
@@ -115,6 +115,65 @@ CREATE TABLE IF NOT EXISTS FACT_RUNTIME_EVENTS (
     CONSTRAINT FK_FRE_SERVER FOREIGN KEY (SERVER_ID) REFERENCES DIM_SERVER (SERVER_ID) DISABLE,
     CONSTRAINT FK_FRE_TOOL   FOREIGN KEY (TOOL_KEY)  REFERENCES DIM_TOOL (TOOL_KEY)     DISABLE,
     CONSTRAINT FK_FRE_DATE   FOREIGN KEY (DATE_KEY)  REFERENCES DIM_DATE (DATE_KEY) DISABLE,
+    DISTRIBUTE BY SERVER_ID
+);
+
+-- One row per runtime detector finding emitted by the proxy.
+CREATE TABLE IF NOT EXISTS FACT_RUNTIME_FINDINGS (
+    FINDING_ID       VARCHAR(255)  NOT NULL,
+    SERVER_ID        VARCHAR(36)   NOT NULL,
+    TOOL_KEY         INT,
+    SESSION_ID       VARCHAR(64),
+    REQUEST_ID       VARCHAR(64),
+    EVENT_TS         TIMESTAMP     NOT NULL,
+    DETECTOR         VARCHAR(100)  NOT NULL,
+    FAMILY           VARCHAR(100),
+    SEVERITY         VARCHAR(20)   NOT NULL,
+    CONFIDENCE       VARCHAR(30),
+    KERNEL_ATTESTED  BOOLEAN,
+    TITLE            VARCHAR(2000),
+    DETAIL           VARCHAR(2000000),
+    EVIDENCE         VARCHAR(2000000),
+    OCCURRENCES      DECIMAL(18,0),
+    LOADED_AT        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (FINDING_ID),
+    DISTRIBUTE BY SERVER_ID
+);
+
+-- One row per completed proxy session.
+CREATE TABLE IF NOT EXISTS FACT_SESSION (
+    SESSION_ID            VARCHAR(64) NOT NULL,
+    SERVER_ID             VARCHAR(36) NOT NULL,
+    STARTED_AT            TIMESTAMP,
+    ENDED_AT              TIMESTAMP,
+    DURATION_SECONDS      DECIMAL(18,6),
+    POSTURE               VARCHAR(30),
+    POSTURE_REASON        VARCHAR(255),
+    SEV_CRITICAL          DECIMAL(18,0),
+    SEV_HIGH              DECIMAL(18,0),   -- was HIGH: reserved word (skyline PREFERRING clause), broke parser
+    SEV_MEDIUM            DECIMAL(18,0),
+    SEV_LOW               DECIMAL(18,0),   -- was LOW: same reserved-word issue
+    KERNEL_ATTESTED       DECIMAL(18,0),
+    REQUESTS              DECIMAL(18,0),
+    FAILURES              DECIMAL(18,0),
+    DENIALS               DECIMAL(18,0),
+    P50_LATENCY_MS        DECIMAL(18,0),
+    P95_LATENCY_MS        DECIMAL(18,0),
+    P99_LATENCY_MS        DECIMAL(18,0),
+    SYSCALL_COUNT         DECIMAL(18,0),
+    DISTINCT_PATHS        DECIMAL(18,0),
+    FILE_READ_BYTES       DECIMAL(18,0),
+    FILE_WRITE_BYTES      DECIMAL(18,0),
+    NET_WRITE_BYTES       DECIMAL(18,0),
+    PROCESS_SPAWNS        DECIMAL(18,0),
+    ANALYSIS_HEALTHY      BOOLEAN,
+    LEARNING_MODE         BOOLEAN,
+    CONFINEMENT           VARCHAR(100),
+    RUNTIME               VARCHAR(100),
+    AUDIT_ENTRIES         DECIMAL(18,0),
+    AUDIT_CHAIN_VERIFIED  BOOLEAN,
+    LOADED_AT             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (SESSION_ID),
     DISTRIBUTE BY SERVER_ID
 );
 

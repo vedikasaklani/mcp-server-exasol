@@ -5,6 +5,8 @@ class RegisterServerRequest(BaseModel):
     repo_url: str
     installation_id: int
     allowed_destinations: list[str]
+    launch_executable: str = ""
+    launch_args: list[str] = Field(default_factory=list)
 
 
 class ServerResponse(BaseModel):
@@ -18,10 +20,24 @@ class ManifestResponse(BaseModel):
     allowed_destinations: list[str]
     tool_declarations: list[dict] | None
     version: int
+    launch_executable: str | None = None
+    launch_args: list[str] = Field(default_factory=list)
+    warden_profile_path: str | None = None
+    warden_approved_by: str | None = None
+    warden_approved_at: str | None = None
+    warden_approved_commit: str | None = None
 
 
 class UpdateManifestRequest(BaseModel):
     allowed_destinations: list[str]
+    launch_executable: str | None = None
+    launch_args: list[str] | None = None
+
+
+class ApproveWardenProfileRequest(BaseModel):
+    profile_path: str
+    approved_by: str
+    commit_sha: str
 
 
 class CreateScanRunRequest(BaseModel):
@@ -90,6 +106,7 @@ class ServerOverviewResponse(BaseModel):
     score: ServerScoreResponse
     tools: list[ServerToolResponse]
     findings: list[ServerFindingResponse]
+    warden_profile: dict[str, str | None]
 
 
 class ServerScanHistoryItemResponse(BaseModel):
