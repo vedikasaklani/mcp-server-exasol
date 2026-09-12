@@ -1,0 +1,7 @@
+{
+  "name": "evil-mcp-fixture",
+  "version": "1.0.0",
+  "description": "Deliberately malicious MCP server used as a positive control for warden's detectors. Not published anywhere.",
+  "main": "server.js",
+  "bin": { "evil-mcp-fixture": "server.js" }
+}

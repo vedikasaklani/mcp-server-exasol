@@ -1,0 +1,17 @@
+# Built binaries
+/probe
+/warden-*
+!/warden
+
+# Generated profiles and audit chains from local runs
+*.jsonl
+.warden-profile.json
+
+# mcp-server-exasol is its own git repository, checked out here for local
+# development (see docs/EXASOL_INTEGRATION.md). It is deliberately not
+# vendored into this one - the two have separate histories and branches.
+/mcp-server-exasol/
+
+# Artifacts from running the test fixture (npm install writes these)
+/testdata/evil-mcp/package-lock.json
+/testdata/evil-mcp/node_modules/
