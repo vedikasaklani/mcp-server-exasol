@@ -280,28 +280,6 @@ The current scoring policy uses:
 `DIM_DATE` must contain the dates referenced by fact rows for the static score
 calculation to work correctly.
 
-## Keeping Exasol local while deploying the API
-
-Exasol is a personal/local analytics setup and should not be exposed directly
-to the public Internet. A deployed API cannot reach the `localhost` Exasol
-instance on a developer laptop.
-
-Recommended architecture:
-
-```text
-Deployed API and PostgreSQL
-            ^
-            | outbound pull or export
-            |
-Local sync worker -> local Exasol
-```
-
-The local worker should pull newly committed PostgreSQL data, write it to local
-Exasol, and run `trust_score.sql`. Synchronization should use a timestamp or
-cursor so it can resume after the laptop or Exasol is offline.
-
-Alternative private-network options include Tailscale or WireGuard, but direct
-public exposure of Exasol port `8563` is not recommended.
 
 ## Troubleshooting
 
