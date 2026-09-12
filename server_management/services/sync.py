@@ -188,9 +188,11 @@ def sync_scan_run(pg_session: Session, scan_run_id: str) -> None:
             MERGE INTO FACT_SCAN_RUN t
             USING (SELECT {scan_run_id} AS SCAN_RUN_ID, {server_id} AS SERVER_ID,
                           {commit_sha} AS COMMIT_SHA, {status} AS STATUS,
-                          {rule_verdict} AS RULE_VERDICT, {llm_verdict} AS LLM_VERDICT,
+                          CAST({rule_verdict} AS VARCHAR(30)) AS RULE_VERDICT,
+                          CAST({llm_verdict} AS VARCHAR(30)) AS LLM_VERDICT,
                           {date_key} AS DATE_KEY, {started_at} AS STARTED_AT,
-                          {finished_at} AS FINISHED_AT, {duration} AS DURATION_SECONDS) s
+                          CAST({finished_at} AS TIMESTAMP) AS FINISHED_AT,
+                          CAST({duration} AS DECIMAL(18,6)) AS DURATION_SECONDS) s
             ON (t.SCAN_RUN_ID = s.SCAN_RUN_ID)
             WHEN MATCHED THEN UPDATE SET
                 t.STATUS = s.STATUS, t.RULE_VERDICT = s.RULE_VERDICT, t.LLM_VERDICT = s.LLM_VERDICT,

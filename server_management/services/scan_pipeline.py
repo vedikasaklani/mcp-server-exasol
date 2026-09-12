@@ -133,9 +133,11 @@ async def trigger_scan(scan_run_id: str) -> None:
     repo_path = None
     try:
         db = SessionLocal()
-        run = db.get(ScanRun, scan_run_id)
-        server = db.get(Server, run.server_id) if run else None
-        db.close()
+        try:
+            run = db.get(ScanRun, scan_run_id)
+            server = db.get(Server, run.server_id) if run else None
+        finally:
+            db.close()
 
         if run is None or server is None:
             await scan_fail(scan_run_id, reason="scan run or server not found")
@@ -162,7 +164,14 @@ async def trigger_scan(scan_run_id: str) -> None:
             rule_findings = _extract_findings(
                 await asyncio.to_thread(run_vulnerable_package_scan, repo_path))
             rule_findings += await asyncio.to_thread(run_semgrep_scan, repo_path)
-            rule_findings += await asyncio.to_thread(run_semgrep_supply_chain_scan, repo_path)
+            try:
+                rule_findings += await asyncio.to_thread(
+                    run_semgrep_supply_chain_scan, repo_path
+                )
+            except RuntimeError as e:
+                if os.environ.get("SEMGREP_SCA_REQUIRED", "").lower() == "true":
+                    raise
+                print(f"semgrep-sca unavailable; continuing without it: {e}")
             tool_declarations = await asyncio.to_thread(extract_tool_declarations, repo_path)
         except Exception as e:
             await scan_fail(scan_run_id, reason=f"phase 1 scan failed: {e}")
@@ -221,6 +230,10 @@ async def trigger_scan(scan_run_id: str) -> None:
         db.close()
         await asyncio.to_thread(_sync_llm_phase, scan_run_id)
         await scan_pass(scan_run_id, phase="llm", verdict=llm_verdict)
+    except Exception as e:
+        # Keep unexpected orchestration or database errors from leaving the
+        # persisted scan in a non-terminal running state.
+        await scan_fail(scan_run_id, reason=f"unexpected scan error: {e}")
 
     finally:
         if repo_path:
