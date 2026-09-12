@@ -174,9 +174,6 @@ EXASOL_DSN=host.docker.internal/<fingerprint>:8563
 For a non-containerized local API, `localhost/<fingerprint>:8563` can be used
 when Exasol is listening on the local machine.
 
-The `/nocertcheck` DSN suffix is acceptable only for a local self-signed
-certificate. Production deployments should use certificate validation or a
-pinned fingerprint.
 
 ## Local setup
 
