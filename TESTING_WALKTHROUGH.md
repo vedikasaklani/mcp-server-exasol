@@ -12,6 +12,74 @@ later command just works.
 
 ---
 
+## 0. Pre-flight — run this before the demo, not during it
+
+Three things bit us last time. Check all three now:
+
+```bash
+# 1. Postgres actually up and reachable (not just "container exists")
+docker exec mcpwarden-pg pg_isready -U postgres
+#    -> if this fails: docker rm -f mcpwarden-pg && docker run -d --name mcpwarden-pg \
+#       -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=warden -p 15432:5432 postgres:16-alpine
+#       && sleep 10 && docker exec mcpwarden-pg pg_isready -U postgres
+
+# 2. Nothing already squatting on 8000/8100/3000 from a previous session
+ss -ltn | grep -E "8000|8100|3000"
+#    -> if anything shows up and you don't recognize it as the process you're about
+#       to start, kill it first (see troubleshooting at the bottom)
+
+# 3. Migrations applied
+export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:15432/warden"
+python3 -m alembic upgrade head
+```
+
+Then start all three services **in their own terminal, in the foreground**
+(so errors are visible immediately instead of hiding in a background log):
+
+**Terminal A — backend:**
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:15432/warden"
+export GITHUB_WEBHOOK_SECRET=test-secret GITHUB_APP_ID=1 GITHUB_PRIVATE_KEY=test
+python3 -m uvicorn server_management.api.api:app --port 8000
+```
+Wait for `Uvicorn running on http://127.0.0.1:8000` before moving on.
+
+**Terminal B — Warden runner** (only needed for step 4, live sessions):
+```bash
+cd Exasol
+go build -o /tmp/warden-bin/warden-observe ./cmd/warden-observe
+go build -o /tmp/warden-bin/warden-serve ./cmd/warden-serve
+go build -o /tmp/warden-bin/probe ./sandbox/runtime/runsc/probe
+cd ..
+export WARDEN_OBSERVE_BIN=/tmp/warden-bin/warden-observe
+export WARDEN_SERVE_BIN=/tmp/warden-bin/warden-serve
+export WARDEN_PROBE_BIN=/tmp/warden-bin/probe
+export WARDEN_TELEMETRY_API=http://127.0.0.1:8000
+export WARDEN_RUNSC_BIN=$(which runsc)
+python3 -m uvicorn server_management.warden_runner:app --port 8100
+```
+
+**Terminal C — dashboard:**
+```bash
+cd dashboard
+npm run dev
+```
+
+Sanity-check all three before you start the demo:
+```bash
+curl -s http://localhost:8000/health          # {"status":"ok",...}
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8100/docs   # 200
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000        # 200
+```
+
+One thing to say out loud during the demo so it doesn't look like a bug: any
+`GITHUB_PRIVATE_KEY`/JWT traceback that prints in Terminal A right after
+registering a server is **expected noise** — it's the background task
+trying to reach the real GitHub API with a placeholder key. It never blocks
+registration and the response the client gets back is already a success.
+
+---
+
 ## 1. Connect an MCP server
 
 You need something real to register and run. The guaranteed-working example
