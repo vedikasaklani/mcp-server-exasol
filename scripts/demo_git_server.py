@@ -67,5 +67,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    try:
+        server = HTTPServer(("127.0.0.1", PORT), Handler)
+    except OSError as exc:
+        if exc.errno != 98:  # EADDRINUSE
+            raise
+        # Almost always this same fixture already running, which is fine:
+        # it reads the repositories from disk per request, so a rebuild is
+        # picked up without a restart. Say that rather than a traceback.
+        print(f"port {PORT} is already in use - if that is this fixture, "
+              f"it is already serving {ROOT} and needs no restart.")
+        print(f"check with: curl -s -o /dev/null -w '%{{http_code}}\\n' "
+              f"'http://127.0.0.1:{PORT}/demo/mcp.git/info/refs?service=git-upload-pack'")
+        raise SystemExit(1)
     print(f"serving git repositories under {ROOT} on http://127.0.0.1:{PORT}")
-    HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    server.serve_forever()

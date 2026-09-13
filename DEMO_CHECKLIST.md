@@ -90,8 +90,20 @@ exactly the same checkout path a real GitHub repo does:
 
 ### 0.4 Start the four processes
 
-Use four terminals and leave them in the foreground — you want to be able
-to point at the logs during the demo.
+First check whether they are already running:
+
+```bash
+ss -ltn | grep -E '8000|8100|3000|9500'
+```
+
+Anything listed is already up — **leave it alone**. Starting a second copy
+just gives you `Address already in use`, which reads like a failure and is
+not one. The git fixture in particular serves the repositories from disk on
+every request, so rebuilding them with `make_demo_repos.sh` does not need a
+restart.
+
+For whatever is *not* running, use a terminal each and leave them in the
+foreground — you want to be able to point at the logs during the demo.
 
 **Terminal A — git fixture host**
 ```bash
