@@ -24,6 +24,59 @@ from pydantic import BaseModel, Field, SecretStr
 app = FastAPI(title="Warden runner")
 _SHA = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
+# Filesystem types fast enough for gVisor to run a confined process from
+# without blowing the warmup handshake's timeout. Anything else (9p/drvfs -
+# a WSL2 Windows-drive mount being the classic case, but also cifs/nfs/fuse)
+# is flagged rather than enumerated by name, since the failure mode is the
+# same regardless of which slow network/virtio filesystem it is.
+_FAST_FSTYPES = {"ext4", "ext3", "ext2", "xfs", "btrfs", "overlay", "overlay2", "tmpfs", "f2fs", "zfs"}
+
+
+def _mount_fstype(path: str) -> str:
+    """Filesystem type of the mount that owns path, via /proc/mounts'
+    longest-prefix match. Best-effort: returns "" (treated as fine) rather
+    than raising if it can't be determined - a platform without /proc, or a
+    path with no matching entry, should never block a caller on its own."""
+    try:
+        resolved = os.path.realpath(path)
+        best_mount, best_fstype = "", ""
+        with open("/proc/mounts", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mount_point = parts[1].replace("\\040", " ")
+                if resolved == mount_point or resolved.startswith(mount_point.rstrip("/") + "/"):
+                    if len(mount_point) > len(best_mount):
+                        best_mount, best_fstype = mount_point, parts[2]
+        return best_fstype
+    except OSError:
+        return ""
+
+
+def _preflight_native_fs(path: str, what: str) -> None:
+    """Fail in milliseconds with an actionable error instead of after a
+    30s+ gVisor warmup timeout. Confirmed root cause of a real failure: a
+    launch_executable (a Python venv interpreter) living under WSL2's
+    /mnt/c/... drvfs mount made every syscall gVisor intercepted for it slow
+    enough that the container never finished starting before warden-serve's
+    handshake gave up - "warmup:initialize timed out after 30s" and/or
+    "timed out after 15s waiting for canary handshake" are both this same
+    underlying cause, just caught at different points in container bring-up.
+    """
+    fstype = _mount_fstype(path)
+    if not fstype or fstype in _FAST_FSTYPES:
+        return
+    raise RuntimeError(
+        f"{what} at {path!r} is on a {fstype!r} filesystem, which gVisor's per-syscall "
+        "interception makes far too slow for the confined process to start within the "
+        "warmup timeout (symptom: 'warmup:initialize timed out after 30s' or 'timed out "
+        "after 15s waiting for canary handshake'). This is almost always a WSL2 "
+        "Windows-drive mount (/mnt/c/...) - move the project (and any venv on it) onto a "
+        "native Linux path inside WSL, e.g. ~/mcp-server-exasol, recreate the venv there, "
+        "and register that path as the launch_executable instead."
+    )
+
 
 class SessionRequest(BaseModel):
     server_id: str = Field(min_length=1)
@@ -59,6 +112,9 @@ class Runner:
     def ensure_session(self, request: SessionRequest) -> SessionResponse:
         if not _SHA.fullmatch(request.commit_sha):
             raise ValueError("commit_sha must be a hexadecimal git commit")
+        resolved_exe = shutil.which(request.executable) or request.executable
+        if os.path.exists(resolved_exe):
+            _preflight_native_fs(resolved_exe, "launch executable")
         with self._lock:
             current = self._sessions.get(request.server_id)
             if current and current.process.poll() is None and current.commit_sha == request.commit_sha:
@@ -185,8 +241,11 @@ class Runner:
             "-cwd", source_dir, "-session", session_id,
             "-telemetry-api", telemetry_api,
             "-env", f"WARDEN_SERVER_SOURCE={request.repo_url}",
-            "--", request.executable, *request.args,
         ]
+        request_timeout = os.environ.get("WARDEN_REQUEST_TIMEOUT")
+        if request_timeout:
+            command += ["-request-timeout", request_timeout]
+        command += ["--", request.executable, *request.args]
         return subprocess.Popen(command, cwd=source_dir)
 
     def _watch(self, server_id: str, process: subprocess.Popen, source_dir: str) -> None:

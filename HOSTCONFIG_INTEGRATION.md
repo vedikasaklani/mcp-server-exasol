@@ -10,6 +10,63 @@ complete and battle-tested against real MCP servers. The only remaining work
 before this is a usable product is frontend integration (see "What's left"
 at the bottom).
 
+## 0. Troubleshooting: `warmup:initialize timed out after 30s` / `timed out after 15s waiting for canary handshake`
+
+If `warden_runner.py` logs either of these when starting a session:
+
+```
+warden-serve: warm pool (a sandbox that cannot be verified must not serve traffic): pool: warm container 1/2: pool: container sbx_... failed warmup step 1/3: runtime: exec on container sbx_...: runsc: request warmup:initialize to container sbx_... timed out after 30s
+warden session exited: server_id=... exit_code=1
+```
+
+or
+
+```
+runsc: canary handshake with container sbx_...: read handshake line: EOF (stderr: ... cannot read client sync file: waiting for sandbox to start: EOF)
+```
+
+**Root cause: the `launch_executable` (and/or the project it lives in) is on
+a slow, non-native filesystem — almost always a WSL2 Windows-drive mount
+(`/mnt/c/...`, filesystem type `9p`).** This is confirmed, not speculative:
+`warmup:initialize` is a real MCP JSON-RPC `initialize` request sent to the
+confined process and the code blocks on the container's own stdout
+(`sandbox/bridge/bridge.go`'s `Handshake()`, read by
+`sandbox/runtime/runsc/runtime.go`) — so this timeout is bounded entirely by
+how fast *your* executable starts and answers, not by anything independent
+of it. gVisor intercepts every syscall the confined process makes; running a
+Python interpreter with a heavy venv (numpy, onnxruntime, fastembed,
+huggingface_hub, per `requirements.txt`) from a 9p-backed drvfs mount means
+every file read gVisor intercepts during interpreter/import startup pays 9p
+network-protocol latency on top of gVisor's own overhead — comfortably
+enough to blow through both the 15s canary-handshake budget and the 30s
+request-handshake budget.
+
+**Fix:** move the whole project (and recreate any venv you register as a
+`launch_executable`) onto a **native Linux path inside WSL** — e.g.
+`~/mcp-server-exasol`, not `C:\Users\...\mcp-server-exasol` /
+`/mnt/c/Users/.../mcp-server-exasol`. Then register the native-path
+interpreter (e.g. `/home/<you>/mcp-server-exasol/.venv/bin/python`) as
+`launch_executable`, not the drvfs one.
+
+This branch now catches this class of failure immediately instead of after
+a 15–30s hang: `warden_runner.py`'s `ensure_session` runs a preflight check
+(`_preflight_native_fs`) on the resolved `launch_executable` path before
+doing any checkout/observe/serve work, and raises a `RuntimeError`
+naming the exact path and filesystem type (`9p`, `cifs`, `nfs`, etc. —
+anything outside a small native allowlist: `ext4`, `ext3`, `ext2`, `xfs`,
+`btrfs`, `overlay`, `tmpfs`, `f2fs`, `zfs`) if it's on anything suspect, so
+you get an answer in milliseconds via the `POST /sessions/{server_id}` HTTP
+response instead of a silent timeout.
+
+If a workload is legitimately slow to start but *is* on a native
+filesystem (a genuinely heavy native binary, not a filesystem problem), the
+handshake timeout itself is configurable: set `WARDEN_REQUEST_TIMEOUT`
+(e.g. `WARDEN_REQUEST_TIMEOUT=90s`) in the environment `warden_runner.py`
+runs in, and it's passed through to `warden-serve -request-timeout`. This
+does not help the drvfs case above — moving off drvfs is the only real fix
+for that — it's for a separate, legitimate "my server is just slow"
+scenario.
+
 ## 1. What this branch now contains
 
 `code-functionality` used to have an older copy of the Python backend nested
@@ -200,6 +257,7 @@ the API):
 | `WARDEN_APPROVER` | name stamped on auto-approved profiles |
 | `WARDEN_RUNNER_TOKEN` | must match the API side if set |
 | `WARDEN_RUNSC_BIN` | path to `runsc`, read by `warden-serve` itself |
+| `WARDEN_REQUEST_TIMEOUT` | optional; overrides `warden-serve -request-timeout` (default 30s) for a legitimately slow but native-filesystem workload — see §0 |
 
 Optional, static analysis:
 
