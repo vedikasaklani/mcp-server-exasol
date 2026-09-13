@@ -556,3 +556,6 @@ Confirm that:
 - Validate GitHub webhook signatures before processing payloads.
 - Do not expose the Exasol SQL port publicly for convenience.
 - Use certificate validation or a pinned fingerprint outside local development.
+
+Pitch Deck: https://drive.google.com/file/d/1PgF8vOsv6xrP4lnjZBzGABJ1Tw9tInRg/view?usp=sharing
+Demo Link: https://drive.google.com/file/d/1R9sLmjSL_2GYnYjBkptb0quM3jcn2iWk/view?usp=sharing
