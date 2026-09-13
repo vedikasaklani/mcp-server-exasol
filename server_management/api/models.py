@@ -11,6 +11,11 @@ class RegisterServerRequest(BaseModel):
     allowed_destinations: list[str] = Field(default_factory=list)
     launch_executable: str = ""
     launch_args: list[str] = Field(default_factory=list)
+    # Only needed for confinement, not static analysis - the confined guest
+    # gets these as its process environment. A repo with a `stdio_server.py`
+    # at its root gets launch_executable/launch_args auto-detected at scan
+    # time, so this is often the only launch-related field a caller sets.
+    env: dict[str, str] = Field(default_factory=dict)
 
 
 class ServerResponse(BaseModel):

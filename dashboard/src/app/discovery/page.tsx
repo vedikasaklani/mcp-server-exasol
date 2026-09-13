@@ -22,11 +22,20 @@ interface Row {
   live: boolean;
 }
 
+// GitHub's standard install URL for an app, by slug - lands the installer
+// on the app's own repo/permission picker, then redirects to this backend's
+// /github/setup (the app's configured setup URL) with a real installation_id.
+// The dashboard's own registration form talked to POST /servers with a
+// hardcoded installation_id: 1, which is exactly the kind of stale/fake id
+// mismatch debugged earlier (a server registered under one installation_id,
+// webhooks arriving under another) - going through the real GitHub flow is
+// what keeps that id correct from the start.
+const GITHUB_APP_INSTALL_URL = "https://github.com/apps/mcp-server-scan/installations/new";
+
 export default function DiscoveryPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [showRegister, setShowRegister] = useState(false);
   const [callTarget, setCallTarget] = useState<{ serverId: string; label: string; tool: Tool } | null>(null);
 
   const load = useCallback(async () => {
@@ -76,9 +85,9 @@ export default function DiscoveryPage() {
               placeholder="Search servers or tools…"
               className="w-60 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[13px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
             />
-            <Button variant="primary" onClick={() => setShowRegister(true)}>
-              Connect a server
-            </Button>
+            <a href={GITHUB_APP_INSTALL_URL} target="_blank" rel="noopener noreferrer">
+              <Button variant="primary">Connect a server</Button>
+            </a>
           </div>
         }
       />
@@ -163,85 +172,52 @@ export default function DiscoveryPage() {
         </div>
       )}
 
-      {showRegister && (
-        <RegisterModal
-          onClose={() => setShowRegister(false)}
-          onDone={() => {
-            setShowRegister(false);
-            void load();
-          }}
-        />
-      )}
       {callTarget && <CallModal {...callTarget} onClose={() => setCallTarget(null)} />}
     </>
   );
 }
 
-const EXAMPLES = [
-  { value: "npm:@modelcontextprotocol/server-memory", note: "official knowledge-graph server" },
-  { value: "npm:@modelcontextprotocol/server-sequential-thinking", note: "official reasoning server" },
-];
+// A JSON value shaped to match a schema property's declared type, so the
+// textarea starts as a fillable template instead of an empty "{}" a
+// non-developer has no way to guess the shape of.
+function placeholderFor(prop: Record<string, unknown>): unknown {
+  switch (prop.type) {
+    case "integer":
+    case "number":
+      return 0;
+    case "boolean":
+      return false;
+    case "array":
+      return [];
+    case "object":
+      return {};
+    default:
+      return "";
+  }
+}
 
-function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.registerServer({ repo_url: value.trim(), installation_id: 1 });
-      onDone();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Registration failed");
-    } finally {
-      setBusy(false);
+function starterArgs(schema: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const properties = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set((schema?.required as string[] | undefined) ?? []);
+  const args: Record<string, unknown> = {};
+  for (const [name, prop] of Object.entries(properties)) {
+    if (required.has(name) || Object.keys(properties).length <= 6) {
+      args[name] = placeholderFor(prop);
     }
-  };
+  }
+  return args;
+}
 
-  return (
-    <Modal title="Connect an MCP server" onClose={onClose}>
-      <p className="text-[12.5px] leading-relaxed text-text-muted">
-        Give an npm package or a GitHub repository. Registration establishes identity only —
-        nothing runs until it has passed a scan.
-      </p>
-
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && value.trim() && !busy && submit()}
-        placeholder="npm:@modelcontextprotocol/server-memory"
-        autoFocus
-        className="mt-4 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12.5px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
-      />
-
-      <div className="mt-3">
-        <div className="eyebrow mb-1.5">Known to work</div>
-        <div className="space-y-1">
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex.value}
-              onClick={() => setValue(ex.value)}
-              className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-2.5 py-1.5 text-left transition-colors hover:bg-surface-hover"
-            >
-              <Mono className="truncate text-text-muted">{ex.value}</Mono>
-              <span className="shrink-0 text-[11px] text-text-faint">{ex.note}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && <p className="mt-3 text-[12.5px] text-danger">{error}</p>}
-
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={submit} disabled={busy || !value.trim()}>
-          {busy ? "Registering…" : "Register"}
-        </Button>
-      </div>
-    </Modal>
-  );
+// "product_id (integer, required)" per field, for a one-line hint under the
+// arguments box - the collapsible full schema is there too, but most people
+// won't open it before asking what to type.
+function fieldHints(schema: Record<string, unknown> | null | undefined): string[] {
+  const properties = (schema?.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set((schema?.required as string[] | undefined) ?? []);
+  return Object.entries(properties).map(([name, prop]) => {
+    const type = typeof prop.type === "string" ? prop.type : "any";
+    return `${name} (${type}${required.has(name) ? ", required" : ""})`;
+  });
 }
 
 function CallModal({
@@ -255,7 +231,7 @@ function CallModal({
   tool: Tool;
   onClose: () => void;
 }) {
-  const [args, setArgs] = useState("{}");
+  const [args, setArgs] = useState(() => JSON.stringify(starterArgs(tool.parameter_schema), null, 2));
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +270,9 @@ function CallModal({
       )}
 
       <div className="eyebrow mb-1.5 mt-4">Arguments (JSON)</div>
+      {fieldHints(tool.parameter_schema).length > 0 && (
+        <p className="mb-1.5 text-[11.5px] text-text-faint">{fieldHints(tool.parameter_schema).join(" · ")}</p>
+      )}
       <textarea
         value={args}
         onChange={(e) => setArgs(e.target.value)}
