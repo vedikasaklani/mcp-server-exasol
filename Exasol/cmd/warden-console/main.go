@@ -71,7 +71,11 @@ type console struct {
 const defaultExasolAPI = "http://localhost:8000"
 
 func run() error {
-	c := &console{opts: defaultLoadOptions(), lines: make(chan string, 8), exasolAPI: defaultExasolAPI}
+	apiURL := os.Getenv("EXASOL_TELEMETRY_API")
+	if apiURL == "" {
+		apiURL = defaultExasolAPI
+	}
+	c := &console{opts: defaultLoadOptions(), lines: make(chan string, 8), exasolAPI: apiURL}
 	c.storage = registry.New(c.exasolAPI)
 
 	root, err := findModuleRoot()
