@@ -21,6 +21,7 @@ from server_management.services.runtime_telemetry import (
     get_sessions,
     get_tools,
     get_trust_score,
+    list_servers,
     resolve_server,
     write_runtime_events,
     write_runtime_findings,
@@ -96,6 +97,11 @@ def health() -> dict[str, Any]:
     except (KeyError, pyexasol.ExaConnectionError) as exc:
         raise HTTPException(status_code=503, detail=f"Exasol unavailable: {exc}") from exc
     return {"status": "ok", "exasol": True, "postgres": False}
+
+
+@router.get("/servers")
+def api_list_servers() -> list[dict[str, Any]]:
+    return list_servers()
 
 
 @router.post("/servers/resolve")
@@ -210,6 +216,20 @@ def api_get_trust_score(server_id: str) -> dict[str, Any]:
     if score is None:
         raise HTTPException(status_code=404, detail="trust score not computed")
     return score
+
+
+@router.get("/servers/{server_id}/summary")
+def api_get_summary(server_id: str) -> dict[str, Any]:
+    """Everything about one server in a single call - what a dashboard
+    landing page needs without fanning out to five requests."""
+    return {
+        "server_id": server_id,
+        "tools": get_tools(server_id),
+        "trust_score": get_trust_score(server_id),
+        "sessions": get_sessions(server_id, 5),
+        "runtime_findings": get_runtime_findings(server_id, 10),
+        "recent_events": get_runtime_events(server_id, 10),
+    }
 
 
 app = FastAPI(title="MCP Exasol Telemetry API")

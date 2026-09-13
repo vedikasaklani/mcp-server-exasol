@@ -43,7 +43,28 @@ def _connect() -> pyexasol.ExaConnection:
         exa.execute(
             "ALTER TABLE FACT_RUNTIME_EVENTS MODIFY EVENT_ID VARCHAR(255)"
         )
+    _ensure_dim_date(exa)
     return exa
+
+
+def _ensure_dim_date(exa: pyexasol.ExaConnection) -> None:
+    """DIM_DATE has no seed data of its own in star.sql, but trust_score.sql
+    inner-joins FACT_STATIC_FINDINGS to it - an empty dimension silently
+    drops every static finding out of the security score. Self-heal it the
+    same way the EVENT_ID width fix above does, so a fresh deployment (e.g.
+    hostconfig, standing this up from scratch) doesn't need a separate
+    manual seeding step."""
+    if exa.execute("SELECT COUNT(*) FROM DIM_DATE").fetchval():
+        return
+    exa.execute(
+        """
+        INSERT INTO DIM_DATE (DATE_KEY, FULL_DATE, DAY_OF_WEEK, MONTH_NUM, YEAR_NUM, IS_WEEKEND)
+        SELECT TO_NUMBER(TO_CHAR(d, 'YYYYMMDD')), d, TO_CHAR(d, 'DY'),
+               TO_NUMBER(TO_CHAR(d, 'MM')), TO_NUMBER(TO_CHAR(d, 'YYYY')),
+               CASE WHEN TO_CHAR(d, 'DY') IN ('SAT', 'SUN') THEN TRUE ELSE FALSE END
+        FROM (SELECT DATE '2020-01-01' + LEVEL - 1 AS d FROM DUAL CONNECT BY LEVEL <= 4018) t
+        """
+    )
 
 
 def _parse_timestamp(value: str | None) -> datetime:
@@ -57,6 +78,28 @@ def _parse_timestamp(value: str | None) -> datetime:
 
 def _date_key(value: datetime) -> int:
     return int(value.strftime("%Y%m%d"))
+
+
+def _iso(value: Any) -> str:
+    """pyexasol returns TIMESTAMP columns as str by default (no dtype
+    mapper configured on connect), so a value here may already be text
+    rather than a datetime - normalize either shape to an ISO string."""
+    if not value:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _num(value: Any) -> float | None:
+    """Exasol DECIMAL columns come back as strings over the wire - a naive
+    passthrough hands API clients "0" where they expect 0."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ensure_server(exa: pyexasol.ExaConnection, server_id: str, repo_url: str) -> None:
@@ -256,24 +299,24 @@ def get_runtime_events(server_id: str, limit: int) -> list[dict[str, Any]]:
     exa = _connect()
     try:
         rows = exa.execute(
-            """
+            f"""
             SELECT e.EVENT_ID, t.TOOL_NAME, e.EVENT_TS, e.DECISION,
                    e.DECISION_REASON, e.SENSITIVE_DATA_FLAG,
                    e.SENSITIVE_DATA_CATEGORIES, e.DESTINATION_MATCH,
                    e.LATENCY_MS, e.BYTES_SENT, e.BYTES_RECEIVED, e.SESSION_ID
             FROM FACT_RUNTIME_EVENTS e
             LEFT JOIN DIM_TOOL t ON t.TOOL_KEY = e.TOOL_KEY
-            WHERE e.SERVER_ID = {server_id}
+            WHERE e.SERVER_ID = {{server_id}}
             ORDER BY e.EVENT_TS DESC
-            LIMIT {limit}
+            LIMIT {int(min(max(limit, 1), 500))}
             """,
-            {"server_id": server_id, "limit": min(max(limit, 1), 500)},
+            {"server_id": server_id},
         ).fetchall()
         return [
             {
                 "event_id": row[0],
                 "tool_name": row[1] or "",
-                "event_ts": row[2].isoformat() if row[2] else "",
+                "event_ts": _iso(row[2]),
                 "decision": row[3],
                 "decision_reason": row[4] or "",
                 "sensitive_data_flag": bool(row[5]),
@@ -283,6 +326,41 @@ def get_runtime_events(server_id: str, limit: int) -> list[dict[str, Any]]:
                 "bytes_sent": row[9] or 0,
                 "bytes_received": row[10] or 0,
                 "session_id": row[11] or "",
+            }
+            for row in rows
+        ]
+    finally:
+        exa.close()
+
+
+def list_servers() -> list[dict[str, Any]]:
+    """Every known server plus its latest computed trust score, if any -
+    the discovery list a dashboard landing page reads first."""
+    exa = _connect()
+    try:
+        rows = exa.execute(
+            """
+            SELECT s.SERVER_ID, s.REPO_URL, t.OVERALL_SCORE, t.SECURITY_SCORE,
+                   t.OPERATIONAL_SCORE, t.DATE_KEY, t.COMPUTED_AT
+            FROM DIM_SERVER s
+            LEFT JOIN (
+                SELECT SERVER_ID, MAX(DATE_KEY) AS DATE_KEY
+                FROM FACT_TRUST_SCORE GROUP BY SERVER_ID
+            ) latest ON latest.SERVER_ID = s.SERVER_ID
+            LEFT JOIN FACT_TRUST_SCORE t
+              ON t.SERVER_ID = latest.SERVER_ID AND t.DATE_KEY = latest.DATE_KEY
+            ORDER BY s.REPO_URL
+            """
+        ).fetchall()
+        return [
+            {
+                "server_id": row[0],
+                "source": row[1],
+                "overall_score": _num(row[2]),
+                "security_score": _num(row[3]),
+                "operational_score": _num(row[4]),
+                "score_date": int(row[5]) if row[5] is not None else None,
+                "computed_at": _iso(row[6]),
             }
             for row in rows
         ]
@@ -427,8 +505,16 @@ def get_trust_score(server_id: str) -> dict[str, Any] | None:
             "total_calls_in_window", "computed_at",
         )
         result: dict[str, Any] = dict(zip(keys, row))
+        numeric = {
+            "security_score", "operational_score", "overall_score", "static_penalty",
+            "runtime_violation_count", "runtime_exfil_flag_count", "success_rate",
+            "p95_latency_ms", "total_calls_in_window",
+        }
+        for key in numeric:
+            result[key] = _num(result[key])
+        result["date_key"] = int(result["date_key"]) if result["date_key"] is not None else None
         if result["computed_at"] is not None:
-            result["computed_at"] = result["computed_at"].isoformat()
+            result["computed_at"] = _iso(result["computed_at"])
         return result
     finally:
         exa.close()
@@ -503,19 +589,19 @@ def get_runtime_findings(server_id: str, limit: int) -> list[dict[str, Any]]:
     exa = _connect()
     try:
         rows = exa.execute(
-            """
+            f"""
             SELECT EVENT_TS, DETECTOR, FAMILY, SEVERITY, CONFIDENCE,
                    KERNEL_ATTESTED, TITLE, DETAIL, OCCURRENCES, SESSION_ID
             FROM FACT_RUNTIME_FINDINGS
-            WHERE SERVER_ID = {server_id}
+            WHERE SERVER_ID = {{server_id}}
             ORDER BY EVENT_TS DESC
-            LIMIT {limit}
+            LIMIT {int(min(max(limit, 1), 500))}
             """,
-            {"server_id": server_id, "limit": min(max(limit, 1), 500)},
+            {"server_id": server_id},
         ).fetchall()
         return [
             {
-                "event_ts": row[0].isoformat() if row[0] else "",
+                "event_ts": _iso(row[0]),
                 "detector": row[1],
                 "family": row[2] or "",
                 "severity": row[3],
@@ -601,20 +687,20 @@ def get_sessions(server_id: str, limit: int) -> list[dict[str, Any]]:
     exa = _connect()
     try:
         rows = exa.execute(
-            """
+            f"""
             SELECT SESSION_ID, STARTED_AT, POSTURE, POSTURE_REASON,
                    SEV_CRITICAL, SEV_HIGH, REQUESTS, DENIALS, CONFINEMENT
             FROM FACT_SESSION
-            WHERE SERVER_ID = {server_id}
+            WHERE SERVER_ID = {{server_id}}
             ORDER BY STARTED_AT DESC
-            LIMIT {limit}
+            LIMIT {int(min(max(limit, 1), 500))}
             """,
-            {"server_id": server_id, "limit": min(max(limit, 1), 500)},
+            {"server_id": server_id},
         ).fetchall()
         return [
             {
                 "session_id": row[0],
-                "started_at": row[1].isoformat() if row[1] else "",
+                "started_at": _iso(row[1]),
                 "posture": row[2] or "",
                 "posture_reason": row[3] or "",
                 "critical": row[4] or 0,

@@ -22,6 +22,8 @@
 
 OPEN SCHEMA MCP_ANALYTICS;
 
+MERGE INTO FACT_TRUST_SCORE t
+USING (
 WITH static_weighted AS (
     -- Decayed, severity- and reachability-weighted penalty, summed across
     -- ALL historical findings for the server (not just the latest scan) -
@@ -100,9 +102,6 @@ combined AS (
     LEFT JOIN static_weighted sw  ON sw.SERVER_ID = s.SERVER_ID
     LEFT JOIN runtime_weighted rw ON rw.SERVER_ID = s.SERVER_ID
 )
-
-MERGE INTO FACT_TRUST_SCORE t
-USING (
     SELECT
         SERVER_ID,
         TO_NUMBER(TO_CHAR(CURRENT_DATE, 'YYYYMMDD')) AS DATE_KEY,

@@ -1,0 +1,1 @@
+{"server_id":"38056b5f-6756-44b1-8d67-3606de250d0a","repo_url":"vedikasaklani/chatbot-and-mcp-agent-commerce","commit_sha":"9dd84a6224b576dd40927773a207021b4650bf67","executable":"python","args":["-m","external.mcp_server"],"approver":"vedika"}
