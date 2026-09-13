@@ -6,7 +6,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -151,6 +151,31 @@ class ToolDeclaration(Base):
 
     rule_result = relationship("RuleAnalysisResult", back_populates="tool_declarations")
     behavioral_findings = relationship("ToolBehavioralFinding", back_populates="tool_declaration")
+
+class DiscoveredTool(Base):
+    """Current known tool catalog per server, for the dashboard's tool
+    discovery/browse-and-select view. Unlike ToolDeclaration (one row per
+    scan's SAST extraction, historical), this is upserted - one row per
+    (server_id, name) reflecting the latest known name/description/schema,
+    whether it came from SAST's static extraction ("declared") or a live
+    tools/list handshake against the running server ("observed"). Mirrors
+    Exasol's DIM_TOOL so the same catalog is queryable from Postgres
+    without a round trip to Exasol."""
+    __tablename__ = "discovered_tools"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    server_id = Column(String, ForeignKey("servers.server_id"), nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    parameter_schema = Column(JSON, nullable=True)
+    source = Column(String, nullable=False, default="observed")  # "declared" | "observed"
+    first_seen_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("server_id", "name", name="uq_discovered_tools_server_name"),
+    )
+
 
 class LlmAnalysisResult(Base):
     """Phase 2 output - semantic comparison of implementation against the

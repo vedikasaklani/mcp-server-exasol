@@ -240,13 +240,24 @@ class Runner:
             serve, "-profile", str(profile), "-probe", probe, "-addr", address,
             "-cwd", source_dir, "-session", session_id,
             "-telemetry-api", telemetry_api,
-            "-env", f"WARDEN_SERVER_SOURCE={request.repo_url}",
         ]
         request_timeout = os.environ.get("WARDEN_REQUEST_TIMEOUT")
         if request_timeout:
             command += ["-request-timeout", request_timeout]
         command += ["--", request.executable, *request.args]
-        return subprocess.Popen(command, cwd=source_dir)
+        # WARDEN_SERVER_SOURCE/WARDEN_SERVER_ID are read by warden-serve's own
+        # HOST-side process (cmd/warden-serve/main.go, before any confinement
+        # happens) to resolve telemetry identity - they must be real process
+        # environment variables, not -env (which only injects into the
+        # CONFINED GUEST's environment and is invisible to warden-serve
+        # itself). Passing WARDEN_SERVER_ID is what makes the trust/telemetry
+        # platform's server_id match the one this API uses everywhere else
+        # (registration, manifest, dashboard queries) instead of a UUID
+        # derived from the source string alone.
+        serve_env = os.environ.copy()
+        serve_env["WARDEN_SERVER_SOURCE"] = request.repo_url
+        serve_env["WARDEN_SERVER_ID"] = request.server_id
+        return subprocess.Popen(command, cwd=source_dir, env=serve_env)
 
     def _watch(self, server_id: str, process: subprocess.Popen, source_dir: str) -> None:
         exit_code = process.wait()

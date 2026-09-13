@@ -38,6 +38,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -258,6 +259,7 @@ func run(args []string) error {
 	if !*noHandshake {
 		warmup = bridge.Handshake(*reqTimeout)
 	}
+	var discoveryPosted sync.Once
 	p, err := pool.New(context.Background(), sup, policy, pool.Config{
 		Size:                    *poolSize,
 		MaxRequestsPerContainer: *maxPerContainer,
@@ -267,6 +269,20 @@ func run(args []string) error {
 		OnWarmupResponse: func(containerID string, req runtime.ExecRequest, res runtime.ExecResult) {
 			// tools/list is where the manifest is pinned (§4.2 step 3).
 			mon.ObserveResponse(containerID, res.Payload)
+			// Also where discovery gets recorded for the trust/reputation
+			// platform - warden-console does this itself when an operator
+			// types `tools`, but nothing did the equivalent for the
+			// long-running daemon, so a server run through the production
+			// warden_runner.py path never showed up in the dashboard's
+			// tool-discovery/browse view at all, regardless of how many
+			// tools it declared.
+			if obs.Storage != nil && obs.ServerID != "" {
+				if tools := parseToolList(res.Payload); len(tools) > 0 {
+					discoveryPosted.Do(func() {
+						obs.Storage.PostToolDiscovery(obs.ServerID, tools, "observed")
+					})
+				}
+			}
 		},
 	}, reg)
 	if err != nil {
@@ -430,6 +446,55 @@ func run(args []string) error {
 	return nil
 }
 
+// parseToolList extracts the tools/list response's tool array into the
+// shape registry.PostToolDiscovery expects. Returns nil (not an error) for
+// anything that isn't a tools/list response - most warmup responses aren't.
+func parseToolList(payload []byte) []registry.ToolInfo {
+	var msg struct {
+		Result struct {
+			Tools []struct {
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				InputSchema json.RawMessage `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil || len(msg.Result.Tools) == 0 {
+		return nil
+	}
+	out := make([]registry.ToolInfo, len(msg.Result.Tools))
+	for i, t := range msg.Result.Tools {
+		var schema any
+		if len(t.InputSchema) > 0 {
+			_ = json.Unmarshal(t.InputSchema, &schema)
+		}
+		out[i] = registry.ToolInfo{Name: t.Name, Description: t.Description, ParameterSchema: schema}
+	}
+	return out
+}
+
+// rpcToolName extracts the target tool name from a tools/call JSON-RPC
+// request body, or "" for anything else. Without this, every call made
+// through the HTTP /rpc endpoint (the production interface - what
+// warden_runner.py's confined process serves, and what a real MCP client
+// or a dashboard's "run a tool" action goes through) recorded an audit
+// trail entry with no tool name at all, which is the one field an audit
+// view needs most. warden-console's own equivalent path sets ToolName
+// itself when the operator types `call <tool>`; nothing did the same for
+// HTTP callers.
+func rpcToolName(body []byte) string {
+	var msg struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil || msg.Method != "tools/call" {
+		return ""
+	}
+	return msg.Params.Name
+}
+
 func newSessionID() string {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
@@ -462,6 +527,7 @@ func (s *server) handleRPC(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.pool.Do(ctx, runtime.ExecRequest{
 		RequestID: r.Header.Get("X-Request-Id"),
+		ToolName:  rpcToolName(body),
 		Payload:   body,
 		Timeout:   s.timeout,
 	})

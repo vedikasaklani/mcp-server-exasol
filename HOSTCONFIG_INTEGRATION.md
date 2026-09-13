@@ -91,7 +91,8 @@ server_management/
     static_analysis.py         # semgrep wrapper
     sync.py                     # Postgres -> Exasol sync (static findings, scan runs, manifests)
     runtime_telemetry.py         # Postgres-free Exasol writer/reader for the runtime/discovery path
-    warden_session_manager.py     # talks to warden_runner.py to start/stop a server's sandbox session
+    warden_session_manager.py     # talks to warden_runner.py to start/stop a server's sandbox session, tracks its gateway address
+    tool_catalog.py                # Postgres mirror of discovered tools, for GET /tools (global dashboard catalog)
   exasol/
     star.sql                      # Exasol schema (MCP_ANALYTICS)
     trust_score.sql                # daily trust-score rollup
@@ -171,10 +172,54 @@ fixes across rather than re-discovering them:
    new `telemetry_api.py` router — both existed in the pre-restructure
    telemetry API and are the two endpoints a dashboard landing page needs
    most. Restored, backed by a new `list_servers()` in `runtime_telemetry.py`.
+8. **`DIM_TOOL` had no `DESCRIPTION`/`PARAMETER_SCHEMA` columns at all** —
+   `GET /servers/{id}/tools` always returned `description: ""` and
+   `parameter_schema: {}` for every tool, which is useless for a dashboard
+   tool picker that needs to show what arguments a tool takes. Added both
+   columns to `star.sql`'s `DIM_TOOL`, and `write_tools()`/`get_tools()`
+   now read and write them via a proper `MERGE`.
+9. **`warden_runner.py` never told `warden-serve` the canonical `server_id`,
+   and the one identity hint it did send never actually arrived.**
+   `WARDEN_SERVER_SOURCE`/`WARDEN_SERVER_ID` are read by `warden-serve`'s own
+   *host*-side process (`cmd/warden-serve/main.go`, before any confinement)
+   to resolve telemetry identity — but `_serve()` was passing
+   `WARDEN_SERVER_SOURCE` via `-env`, which only injects environment
+   variables into the **confined guest process**, invisible to
+   `warden-serve` itself. In practice this meant every server run through
+   the real, production `warden_runner.py` path (as opposed to the
+   interactive `warden-console`) got a telemetry identity derived from its
+   bare executable name (`node`, `python3`, ...) instead of its actual
+   registered identity — confirmed empirically: a session registered as
+   server X reported `telemetry enabled: server_id=<some unrelated UUID>`,
+   and every audit/discovery query against server X's real ID came back
+   empty. Fixed by passing both as real subprocess environment variables
+   (`env=` on `Popen`, not `-env`) including the new `WARDEN_SERVER_ID`, so
+   telemetry now lands under the exact same `server_id` the rest of the API
+   uses. **This is the fix that makes the dashboard's audit/reputation
+   views show anything at all** for servers launched the real way.
+10. **`warden-serve`'s HTTP `/rpc` handler never extracted the tool name
+    from the request.** `handleRPC` built its `runtime.ExecRequest` with no
+    `ToolName`, so every call made over HTTP (the interface a dashboard or
+    any real MCP client uses — `warden-console`'s own equivalent sets
+    `ToolName` itself when an operator types `call <tool>`, but nothing did
+    the same for HTTP callers) recorded an audit trail entry with an empty
+    tool name. Fixed with a small `rpcToolName()` that parses the JSON-RPC
+    body for `tools/call` requests.
+11. **`warden-serve` never posted tool discovery outside the interactive
+    console.** `PostToolDiscovery` was only ever called from
+    `warden-console`'s `tools` command; the long-running daemon — the
+    production path — captures the exact same `tools/list` response during
+    its warmup handshake (that's how it pins the manifest hash, §4.2) but
+    never told the telemetry platform about it. A server run through
+    `warden_runner.py` therefore never appeared in `GET /servers/{id}/tools`
+    or the dashboard's tool catalog at all, no matter how many tools it
+    declared. Fixed: `OnWarmupResponse` now parses the tools/list payload
+    and posts it once (`sync.Once`) per session.
 
-None of these are Go-side issues — the sandbox/proxy engine itself
-(`Exasol/sandbox/*`, `Exasol/cmd/warden-serve`) was not changed beyond the
-telemetry-URL wiring and passed its full existing test suite unmodified.
+None of the first seven were Go-side issues; #9-11 are, and are the ones
+that actually make real-time execution and discovery show up correctly on
+a dashboard for a server run the production way. All confirmed by an
+actual end-to-end run (see §6) — not by code review alone.
 
 ## 3. Known issues, not fixed (flagging for you)
 
@@ -266,7 +311,62 @@ Optional, static analysis:
 | `SEMGREP_BIN`, `SEMGREP_APP_TOKEN`, `SEMGREP_SCA_REQUIRED`, `SEMGREP_SCA_TIMEOUT_SECONDS` | semgrep wrapper config |
 | `MCP_SCANNER_BIN` | path to cisco-ai mcp-scanner, if used |
 
-## 6. How to stand it up and test it (what I actually ran)
+## 6. Dashboard API reference
+
+Everything below is served by `api.py` (which mounts `telemetry_api.py`'s
+router, so it's one process, one base URL). This is the complete surface a
+frontend needs — nothing here requires touching Exasol or Postgres directly.
+
+### Registration & discovery (Postgres-backed, `api.py`)
+
+| Method & path | What it's for |
+|---|---|
+| `POST /servers` | Register a server (repo URL, allowed destinations, launch command). Kicks off the scan pipeline and a Warden session in the background. |
+| `GET /servers/{id}/manifest` | Current manifest: allowed destinations, declared tools, launch command, Warden approval state. |
+| `PATCH /servers/{id}/manifest` | Operator edits (e.g. change `launch_executable`) — versioned, restarts the Warden session if the launch command changed. |
+| `POST /servers/{id}/warden/approve` / `POST /servers/{id}/warden/profile` | Approve or upload a capability profile by hand, bypassing auto-approval. |
+| `GET /tools?server_id=&q=` | **Global tool catalog, Postgres-backed** — every known tool across every registered server, optionally filtered by server or name substring. This is the dashboard's "browse and select a tool" view; it mirrors Exasol's `DIM_TOOL` so it's queryable without touching Exasol, per the explicit requirement that tool info live in Postgres too. |
+
+### Per-server discovery, audit, reputation (Exasol-backed, `telemetry_api.py`)
+
+| Method & path | What it's for |
+|---|---|
+| `GET /servers` | Every known server plus its latest computed trust score — the landing-page list. |
+| `GET /servers/{id}/tools` | This server's known tools (declared + observed), with description and parameter schema — the per-server tool picker. |
+| `GET /servers/{id}/runtime-events?limit=` | The audit trail: one row per tool call, with decision, latency, byte counts, destination match, sensitive-data flags. |
+| `GET /servers/{id}/runtime-findings?limit=` | Security findings the behavioral analyzer raised (path-drift, syscall-drift, injection patterns, ...), most severe first. |
+| `GET /servers/{id}/sessions?limit=` | Per-session summaries — posture, request counts, latency percentiles, findings by severity. |
+| `GET /servers/{id}/trust-score` | The latest computed reputation: security score, operational score, overall score, decay-weighted violation/exfil counts. |
+| `POST /compute-scores` | Force an immediate rescore (normally a scheduled job — useful right after a session ends). |
+| `GET /servers/{id}/summary` | Tools + trust score + last 5 sessions + last 10 findings + last 10 events, in one call — what a server's detail page needs without fanning out. |
+
+### Real-time execution (new, proxies to the live Warden gateway)
+
+This is what makes "select a tool and run it" possible from a dashboard.
+Under the hood, each running server has its own `warden-serve` gateway
+(started by `warden_runner.py`); these endpoints look up that gateway's
+address and proxy to it, starting a session on demand if none is warm yet.
+
+| Method & path | What it's for |
+|---|---|
+| `GET /servers/{id}/live/status` | Is a gateway actually running for this server right now? `{"running": bool, "address": "host:port" \| null}`. Never starts one — pure status check. |
+| `GET /servers/{id}/live/tools` | The server's **live** tool list, straight from its own `tools/list` — the freshest possible answer, as opposed to `GET /servers/{id}/tools`'s historical catalog. Starts a session on demand. |
+| `POST /servers/{id}/call` `{"tool_name": "...", "arguments": {...}}` | **Make a real tool call.** Starts a session on demand if needed, forwards the call to the confined process, returns its result (or a 422 with the JSON-RPC error body on failure). The call is recorded to the audit trail automatically — nothing else needs to happen for `GET /servers/{id}/runtime-events` to show it. |
+| `GET /servers/{id}/live/metrics` | Live pool/traffic metrics straight from `warden-serve`'s own `/stats` — request counts, container pool state, latency, findings-by-severity gauges. For a real-time monitoring widget; complements the historical `GET /servers/{id}/sessions`. |
+
+A session started on demand this way needs a completed static-analysis pass
+and a configured `launch_executable` (`PATCH /servers/{id}/manifest`) — if
+neither is ready, these all return `503` with a message saying exactly that,
+rather than a confusing timeout.
+
+**Practical note on identity:** everything above only lines up (a server's
+audit trail actually shows up under the same `server_id` the registration
+API gave it) because of bug fix #9 in §2 — `warden_runner.py` now passes the
+real `server_id` through to `warden-serve`. If you ever see a running
+session whose telemetry doesn't appear anywhere, that's the first thing to
+check.
+
+## 7. How to stand it up and test it (what I actually ran)
 
 This is the exact sequence I used to battle-test this branch. Runtimes
 needed: Python 3.11+, Go 1.23+, Docker (for a scratch Postgres — swap for
@@ -356,6 +456,65 @@ What "working" looks like:
 - `curl .../servers` afterward shows both servers with clearly separated
   scores (malicious near 30, legitimate near 90+).
 
+### Testing the production path (`warden_runner.py` + real-time `/call`)
+
+The `warden-console` test above proves the sandbox and telemetry work; it
+does **not** exercise `warden_runner.py` (the host-side git-checkout
+service) or the `/call`/`live/*` HTTP endpoints in §6 — that's the actual
+path a dashboard drives. To test that too:
+
+```bash
+cd Exasol
+go build -o /tmp/warden-bin/warden-observe ./cmd/warden-observe
+go build -o /tmp/warden-bin/warden-serve ./cmd/warden-serve
+go build -o /tmp/warden-bin/probe ./sandbox/runtime/runsc/probe
+
+export WARDEN_OBSERVE_BIN=/tmp/warden-bin/warden-observe
+export WARDEN_SERVE_BIN=/tmp/warden-bin/warden-serve
+export WARDEN_PROBE_BIN=/tmp/warden-bin/probe
+export WARDEN_TELEMETRY_API=http://127.0.0.1:8000   # your running api.py
+export WARDEN_RUNSC_BIN=$(which runsc)
+python3 -m uvicorn server_management.warden_runner:app --port 8100
+```
+
+In another terminal, start a session the way `warden_session_manager.py`
+would (any public git repo with a buildless entrypoint works — no GitHub
+token needed for a public HTTPS clone):
+
+```bash
+curl -s -X POST http://127.0.0.1:8100/sessions/<server_id> \
+  -H 'Content-Type: application/json' -d '{
+    "server_id": "<server_id>",
+    "repo_url": "https://github.com/<owner>/<repo>",
+    "commit_sha": "<full commit sha>",
+    "executable": "node",
+    "args": ["server.js"]
+}'
+```
+
+This clones the repo, runs `warden-observe` in learning mode, and starts a
+`warden-serve` gateway — the response's `"address"` is where it's listening.
+`warden_session_manager.reconcile_server()` does exactly this automatically
+once a server has a completed scan and a `launch_executable` set, caching
+the address so `api.py`'s `/call`/`live/*` endpoints in §6 can find it
+without hitting `warden_runner.py` again. From there:
+
+```bash
+curl -s http://localhost:8000/servers/<server_id>/live/status
+curl -s http://localhost:8000/servers/<server_id>/live/tools
+curl -s -X POST http://localhost:8000/servers/<server_id>/call \
+  -H 'Content-Type: application/json' -d '{"tool_name":"<name>","arguments":{}}'
+curl -s http://localhost:8000/servers/<server_id>/live/metrics
+curl -s http://localhost:8000/servers/<server_id>/runtime-events   # the call you just made, audited
+```
+
+I validated this exact sequence end to end with a throwaway single-file
+Node MCP server and a local git remote standing in for GitHub (real GitHub
+App credentials aren't available in this environment — see §3) — a real
+tool call went in through `POST /servers/{id}/call`, came back with the
+correct result, and showed up immediately in `runtime-events` under the
+right `server_id`, which is what bug fixes #9–11 in §2 were for.
+
 Go side, independently:
 
 ```bash
@@ -364,32 +523,51 @@ go build ./...
 go test ./...
 ```
 
-## 7. What's left — next step is frontend integration
+## 8. What's left — next step is frontend integration
 
 Backend-side, this branch is feature-complete for what was asked:
 
-- ✅ Any MCP server can be loaded and have its tools called through
-  `warden-serve`'s gateway (confirmed against 3 distinct real servers plus a
-  malicious fixture).
-- ✅ Discovery (`DIM_TOOL`, declared vs. observed), audit (`FACT_RUNTIME_EVENTS`),
-  reputation (`FACT_TRUST_SCORE`), and full telemetry are all persisted to
-  Exasol and exposed as HTTP APIs via `telemetry_api.py`, mounted into the
-  main backend (`api.py`).
+- ✅ **Any MCP server can be loaded and have its tools called**, two ways:
+  interactively (`warden-console`, confirmed against 3 distinct real servers
+  plus a malicious fixture) and **the real production path** —
+  register → `warden_runner.py` clones/observes/serves →
+  `POST /servers/{id}/call` makes a live tool call and gets a real result
+  back. Verified end to end with a throwaway git-hosted MCP server (§7),
+  not just by code review.
+- ✅ **Tool discovery lives in both Exasol and Postgres**, as required: a
+  server's tools (name, description, full parameter schema) land in
+  Exasol's `DIM_TOOL` *and* Postgres's new `discovered_tools` table, kept in
+  sync automatically whenever tools are posted, with a global cross-server
+  catalog at `GET /tools` for a dashboard's browse-and-select view.
+- ✅ **Exasol holds the complete audit trail and reputation**: every tool
+  call (`FACT_RUNTIME_EVENTS`, now correctly tagged with the tool name —
+  bug #10), every security finding (`FACT_RUNTIME_FINDINGS`), every session
+  (`FACT_SESSION`), and the computed trust score (`FACT_TRUST_SCORE`), all
+  under the same `server_id` the registration API uses (bug #9) — so a
+  dashboard's per-server detail page is one `GET /servers/{id}/summary`
+  away.
+- ✅ **Real-time execution and monitoring** are new in this pass: `POST
+  /servers/{id}/call` to run a tool, `GET /servers/{id}/live/status` and
+  `/live/metrics` for a live monitoring widget, `/live/tools` for the
+  freshest possible tool list. All proxy to the actual running
+  `warden-serve` gateway, starting one on demand if needed. Full reference
+  in §6.
 - ✅ Registration, manifest, and scan-run lifecycle (`api.py` + Postgres) work
   against a real database and are ready for the GitHub App webhook path once
   real GitHub App credentials are configured (not testable without them —
   everything downstream of registration was verified using synthetic
-  registrations instead of a live webhook).
+  registrations and a local git remote instead of a live webhook).
 
 What's not done, and is genuinely next:
 
-1. **Frontend integration.** Nothing here has a UI. Every endpoint in
-   `telemetry_api.py` (§6 above) and `api.py` is what a frontend should call
-   — `GET /servers` and `GET /servers/{id}/summary` in particular are built
-   specifically to be a dashboard's landing-page calls.
+1. **Frontend integration.** Nothing here has a UI. §6 is the complete API
+   surface a frontend should build against — discovery, audit, reputation,
+   real-time execution, monitoring, and the global tool catalog are all
+   there and battle-tested.
 2. **Real GitHub App credentials**, to exercise the webhook → scan pipeline
-   path for real instead of via synthetic `POST /servers` + manual telemetry
-   calls.
+   → automatic-reconciliation path for real, end to end in one continuous
+   flow, instead of via synthetic `POST /servers` plus a manually-driven
+   `warden_runner.py` session as was used here to prove the mechanism works.
 3. **A production Exasol schema decision** per §4, if `hostconfig`'s
    instance has history predating this schema.
 4. Whatever `hostconfig` needs to actually run `warden_runner.py` on its own

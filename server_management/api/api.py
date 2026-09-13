@@ -8,8 +8,12 @@ Thin wrapper over onboard_services.py:
 from __future__ import annotations
 
 import os
+import uuid
+from typing import Any
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from server_management.api import frontend, githubapp
@@ -43,6 +47,7 @@ from server_management.services.onboard_services import (
     approve_warden_profile,
     store_warden_profile,
 )
+from server_management.services.tool_catalog import list_tools
 from server_management.services.warden_session_manager import warden_sessions
 from server_management.services.sync import (
     sync_latest_manifest_history,
@@ -178,6 +183,107 @@ async def api_upload_warden_profile(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     background_tasks.add_task(warden_sessions.reconcile_server, server_id)
     return _manifest_response(manifest)
+
+
+class ToolCallRequest(BaseModel):
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+def _gateway_address(server_id: str) -> str:
+    """The running Warden gateway's address for server_id, starting a
+    session on demand if none is cached yet - a dashboard shouldn't have to
+    know or care whether a server's confined process happens to be warm
+    already."""
+    address = warden_sessions.get_address(server_id) or warden_sessions.reconcile_server(server_id)
+    if not address:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no active Warden session for this server - it needs an approved "
+                "static analysis pass and a configured launch_executable before it "
+                "can run live (see PATCH /servers/{id}/manifest and "
+                "POST /servers/{id}/warden/approve)"
+            ),
+        )
+    return address
+
+
+def _rpc(address: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": method, "params": params or {}}
+    try:
+        response = httpx.post(f"http://{address}/rpc", json=payload, timeout=30.0)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Warden gateway at {address} is unreachable: {exc}") from exc
+    if response.is_error:
+        raise HTTPException(status_code=502, detail=f"Warden gateway error: {response.text[-2000:]}")
+    return response.json()
+
+
+@app.get("/servers/{server_id}/live/tools")
+def api_live_tools(server_id: str):
+    """The server's live tool list straight from its own tools/list
+    handshake - the freshest possible answer, as opposed to
+    GET /servers/{id}/tools, which is the historical Exasol-persisted
+    catalog used for browsing servers that aren't currently running."""
+    address = _gateway_address(server_id)
+    result = _rpc(address, "tools/list")
+    return result.get("result", result)
+
+
+@app.post("/servers/{server_id}/call")
+def api_call_tool(server_id: str, req: ToolCallRequest):
+    """Make a real tool call against a live, confined MCP server - the
+    dashboard's "run a tool" action. warden-serve records the call (audit
+    trail, security findings, latency) to Exasol on its own as it executes;
+    nothing extra needs to happen here for that."""
+    address = _gateway_address(server_id)
+    result = _rpc(address, "tools/call", {"name": req.tool_name, "arguments": req.arguments})
+    if "error" in result:
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result.get("result", result)
+
+
+@app.get("/servers/{server_id}/live/status")
+def api_live_status(server_id: str):
+    """Whether a Warden gateway is actually up for this server right now -
+    the dashboard's "is this thing running" indicator, distinct from
+    whether it has ever run (that's GET /servers/{id}/trust-score)."""
+    address = warden_sessions.get_address(server_id)
+    if not address:
+        return {"running": False, "address": None}
+    try:
+        response = httpx.get(f"http://{address}/healthz", timeout=5.0)
+        return {"running": response.status_code == 200, "address": address}
+    except httpx.RequestError:
+        return {"running": False, "address": address}
+
+
+@app.get("/servers/{server_id}/live/metrics")
+def api_live_metrics(server_id: str):
+    """Live pool/traffic metrics straight from warden-serve - request
+    counts, latency, container pool state - for the dashboard's real-time
+    monitoring view. Complements the historical per-session summaries in
+    GET /servers/{id}/sessions."""
+    address = warden_sessions.get_address(server_id)
+    if not address:
+        raise HTTPException(status_code=503, detail="no active Warden session for this server")
+    try:
+        response = httpx.get(f"http://{address}/stats", timeout=5.0)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Warden gateway at {address} is unreachable: {exc}") from exc
+    if response.is_error:
+        raise HTTPException(status_code=502, detail=f"Warden gateway error: {response.text[-2000:]}")
+    return response.json()
+
+
+@app.get("/tools")
+def api_list_tools(server_id: str | None = None, q: str | None = None):
+    """Global tool catalog across every registered server, Postgres-backed
+    (mirrors Exasol's DIM_TOOL) - what the dashboard's tool-discovery/browse
+    view lists and lets an operator pick from, independent of whether any
+    particular server is live right now."""
+    return list_tools(server_id=server_id, q=q)
 
 
 #internal, service-to-service

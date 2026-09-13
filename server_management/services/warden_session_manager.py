@@ -31,10 +31,24 @@ _READY_STATUSES = {
 
 class WardenSessionManager:
     def __init__(self) -> None:
-        self._sessions: dict[str, str] = {}
+        # server_id -> (commit_sha, gateway address "host:port"). The
+        # address is what makes real-time tool calls possible: it's where
+        # warden-serve is listening for this server's confined MCP process,
+        # and it's the one piece of session state warden_runner.py's own
+        # SessionResponse carries that nothing else persists anywhere.
+        self._sessions: dict[str, tuple[str, str]] = {}
         self._lock = threading.RLock()
 
-    def reconcile_server(self, server_id: str, git_token: str | None = None) -> None:
+    def get_address(self, server_id: str) -> str | None:
+        with self._lock:
+            session = self._sessions.get(server_id)
+            return session[1] if session else None
+
+    def reconcile_server(self, server_id: str, git_token: str | None = None) -> str | None:
+        """Ensure a session is running for server_id, starting one if
+        needed. Returns the gateway address, or None if the server isn't
+        ready to run yet (no approved static analysis, no launch_executable
+        configured)."""
         with session_scope() as db:
             manifest = db.get(ServerManifest, server_id)
             latest = (
@@ -45,9 +59,14 @@ class WardenSessionManager:
             )
             server = db.get(Server, server_id)
             if manifest is None or latest is None or server is None:
-                return
+                return None
             if latest.status not in _READY_STATUSES or not manifest.launch_executable:
-                return
+                return None
+            cached = self.get_address(server_id)
+            if cached is not None:
+                with self._lock:
+                    if self._sessions.get(server_id, ("",))[0] == latest.commit_sha:
+                        return cached
             if git_token is None:
                 git_token = self._get_installation_token(server.installation_id)
             result = self._start_runner_session(
@@ -59,8 +78,10 @@ class WardenSessionManager:
                 git_token=git_token,
             )
             self._record_approval(db, server_id, latest, result["profile_path"])
+            address = result["address"]
             with self._lock:
-                self._sessions[server_id] = latest.commit_sha
+                self._sessions[server_id] = (latest.commit_sha, address)
+            return address
 
     def _start_runner_session(
         self, *, server_id: str, repo_url: str, commit_sha: str,

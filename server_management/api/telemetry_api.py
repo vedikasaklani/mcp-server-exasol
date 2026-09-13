@@ -149,7 +149,7 @@ def api_write_tools(
     server_id: str, req: ToolDiscoveryRequest
 ) -> dict[str, int]:
     try:
-        count = write_tools(server_id, req.tools)
+        count = write_tools(server_id, req.tools, req.source)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"accepted": count}

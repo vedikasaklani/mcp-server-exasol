@@ -373,7 +373,7 @@ def get_tools(server_id: str) -> list[dict[str, Any]]:
     try:
         rows = exa.execute(
             """
-            SELECT TOOL_NAME
+            SELECT TOOL_NAME, DESCRIPTION, PARAMETER_SCHEMA, DISCOVERY_SOURCE, UPDATED_AT
             FROM DIM_TOOL
             WHERE SERVER_ID = {server_id}
             ORDER BY TOOL_NAME
@@ -381,14 +381,20 @@ def get_tools(server_id: str) -> list[dict[str, Any]]:
             {"server_id": server_id},
         ).fetchall()
         return [
-            {"name": row[0], "description": "", "parameter_schema": {}}
+            {
+                "name": row[0],
+                "description": row[1] or "",
+                "parameter_schema": json.loads(row[2]) if row[2] else {},
+                "source": row[3] or "",
+                "updated_at": _iso(row[4]),
+            }
             for row in rows
         ]
     finally:
         exa.close()
 
 
-def write_tools(server_id: str, tools: list[dict[str, Any]]) -> int:
+def write_tools(server_id: str, tools: list[dict[str, Any]], source: str = "observed") -> int:
     exa = _connect()
     try:
         if exa.execute(
@@ -400,7 +406,39 @@ def write_tools(server_id: str, tools: list[dict[str, Any]]) -> int:
             name = str(tool.get("name") or "").strip()
             if not name:
                 raise ValueError("tool name must not be empty")
-            ensure_tool_key(exa, server_id, name)
+            schema = tool.get("parameter_schema")
+            exa.execute(
+                """
+                MERGE INTO DIM_TOOL t
+                USING (
+                    SELECT {server_id} AS SERVER_ID, {name} AS TOOL_NAME,
+                           {description} AS DESCRIPTION, {schema} AS PARAMETER_SCHEMA,
+                           {source} AS DISCOVERY_SOURCE
+                ) s
+                ON (t.SERVER_ID = s.SERVER_ID AND t.TOOL_NAME = s.TOOL_NAME)
+                WHEN MATCHED THEN UPDATE SET
+                    t.DESCRIPTION = s.DESCRIPTION, t.PARAMETER_SCHEMA = s.PARAMETER_SCHEMA,
+                    t.DISCOVERY_SOURCE = s.DISCOVERY_SOURCE, t.UPDATED_AT = CURRENT_TIMESTAMP
+                WHEN NOT MATCHED THEN INSERT (SERVER_ID, TOOL_NAME, DESCRIPTION, PARAMETER_SCHEMA, DISCOVERY_SOURCE)
+                VALUES (s.SERVER_ID, s.TOOL_NAME, s.DESCRIPTION, s.PARAMETER_SCHEMA, s.DISCOVERY_SOURCE)
+                """,
+                {
+                    "server_id": server_id,
+                    "name": name,
+                    "description": tool.get("description"),
+                    "schema": json.dumps(schema) if schema else None,
+                    "source": source,
+                },
+            )
+        try:
+            from server_management.services.tool_catalog import upsert_discovered_tools
+            upsert_discovered_tools(server_id, tools, source)
+        except Exception:
+            # Postgres mirror is best-effort: telemetry_api.py is designed to
+            # run with only Exasol configured (no DATABASE_URL), and an
+            # ad-hoc server_id with no matching `servers` row has nothing to
+            # attach a Postgres row to either way.
+            pass
         return len(tools)
     finally:
         exa.close()
