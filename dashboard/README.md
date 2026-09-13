@@ -6,7 +6,10 @@ views: Overview, Discovery Hub, Audit & Activity, Security Controls.
 
 ## Run it
 
+All commands below run **from this `dashboard/` directory**, not the repo root:
+
 ```bash
+cd dashboard   # skip if you're already here
 npm install
 cp .env.example .env.local   # point NEXT_PUBLIC_API_BASE_URL at your backend
 npm run dev                  # http://localhost:3000
