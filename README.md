@@ -1,26 +1,55 @@
-# MCP Server Registry and Exasol Analytics
+# MCP Server Registry, Confinement, and Exasol Analytics
 
-This service registers MCP server repositories, scans their source code, stores
-scan results in PostgreSQL, and synchronizes analytics data into Exasol.
-Exasol is used for analytical queries and daily trust-score calculations; it is
-not the operational system of record.
+Any AI agent can point at any MCP server and start calling its tools within
+seconds. There is no app-store review, no registry security scan, not even a
+changelog — agents cannot read source code before invoking a tool, so the
+ecosystem runs on trust with nothing behind it. Static scanners (SAST,
+dependency checks) grade code quality once; none of them score the
+**behavioral** trust of a live, evolving MCP server over time, and a server
+that behaves well for a month can still change.
+
+This project is that missing layer: it registers an MCP server's repository,
+re-scans every push to `main`, can run the server confined under **gVisor**
+to observe what it actually does, and rolls all of it into a security score,
+an operational score, and a blended trust score per server — queryable and
+dashboard-ready.
 
 ## What the project does
 
-The application supports this workflow:
+Two analysis layers feed one Exasol-backed scoring engine:
 
-1. Register an MCP server repository and its allowed network destinations.
-2. Receive a GitHub push webhook for the `main` branch.
-3. Clone the pushed commit.
-4. Run deterministic rule-based analysis and extract declared tools.
-5. Run the behavioral LLM analysis when Phase 1 is not rejected.
-6. Persist scan lifecycle, findings, manifests, and verdicts in PostgreSQL.
-7. Synchronize the committed results into Exasol.
-8. Calculate a daily security, operational, and overall trust score.
+1. **Static, on every push — always on.** A signature-verified GitHub App
+   webhook (scoped to `main`, short-lived installation tokens instead of
+   static PATs) fires a two-phase scan on every commit:
+   - *Deterministic:* Semgrep SAST + supply-chain scanning, vulnerable-package
+     detection, and tool-declaration extraction.
+   - *Behavioral:* an LLM review comparing what a tool claims to do against
+     what its code actually does.
 
-PostgreSQL remains usable when Exasol is unavailable. Exasol synchronization is
-best effort and must not turn an already-committed PostgreSQL scan into a
-failed scan.
+   Findings, manifests, and scan history land in PostgreSQL first, then sync
+   into Exasol. This layer needs nothing beyond registering the repo, and it
+   never stops — Exasol gets a fresh rollup on every repo change whether or
+   not the runtime layer below is ever used.
+2. **Runtime, on demand.** Give a registered server a launch command, the
+   env vars its own code needs, and a **stdio**-transport entry point (Warden
+   drives MCP over stdio, not HTTP), and Warden runs it confined under
+   **gVisor**, observing real tool calls — syscalls, network destinations,
+   sensitive-data flags — and streams that telemetry into the same Exasol
+   facts as the static layer.
+
+PostgreSQL is the operational system of record for both layers. Exasol is
+purely analytical for queries and daily trust-score calculations;
+synchronization is best effort and must not turn an already-committed
+PostgreSQL scan into a failed scan.
+
+## Dashboard
+
+A Next.js console (`dashboard/`) is the operator's view into all of this:
+look up any registered server, its scan history, its live confined-session
+status, its runtime audit trail, and its current trust score at a glance.
+Security and operational scores are shown separately on purpose — a server
+can be functionally reliable but security-risky, and that distinction
+matters to whoever is deciding whether to connect it.
 
 ## Repository layout
 
@@ -256,6 +285,15 @@ Apply the migration before registering or updating launch specifications:
 alembic upgrade head
 ```
 
+A `launch_executable` intended for the automated runner must be a real binary
+on the runner's native Linux filesystem (see the session section above) and
+must start an MCP server in **stdio** transport. The warden bridge drives
+JSON-RPC over the process's standard input for the warm-up handshake and every
+live call; a server launched in `streamable-http` or SSE mode never reads
+stdin, so it always times out during warm-up regardless of how fast or native
+the environment is. Serve such servers through a stdio-capable entry point
+when warden owns them.
+
 To make runtime and static Exasol facts use the same repository identity,
 start Warden with the registered canonical repository source:
 
@@ -298,13 +336,51 @@ export WARDEN_APPROVER=vedika
 /opt/mcp-warden/venv/bin/uvicorn server_management.warden_runner:app --host 0.0.0.0 --port 8100
 ```
 
+Optional runner timeouts, all in seconds unless noted:
+
+- `WARDEN_OBSERVE_TIMEOUT` (default `300`): wall-clock limit for one
+  `warden-observe` run.
+- `WARDEN_REQUEST_TIMEOUT`: forwarded to `warden-serve` as
+  `-request-timeout`, the per-request/response budget for the warm-up
+  handshake and for each live call.
+- `WARDEN_INSTALL_TIMEOUT` (default `300`): limit for installing the
+  checked-out server's own dependencies.
+
 The runner fetches by repository identity and performs an explicit detached
-checkout of the requested SHA. For private repositories, the API forwards the
-short-lived GitHub App installation token obtained for the scan; no static
-`WARDEN_GIT_TOKEN` is required. The API never needs the runner's source tree,
-profile file, `runsc`, or Warden binaries. `WARDEN_SOURCE_ROOT` is no longer
-part of the automated flow. The existing profile-upload endpoint remains a
-manual fallback, not a prerequisite for normal registration.
+checkout of the requested SHA. After checkout it installs the server's own
+declared dependencies (a root `package.json` or root `requirements.txt`) so a
+plain `node index.js` or `python3 -m ...` launch can actually start. That
+install runs **unconfined on the runner host**, with this host's full
+privileges, and only the detected server process is sandboxed; this is the
+same tradeoff `Exasol/sandbox/fetch` documents, and it means repository
+credentials or host secrets must never be reachable from a server whose
+install step you do not trust. Servers that do not vendor or declare their
+dependencies in one of those two files must resolve them through
+`launch_executable` itself (a real interpreter binary, not an `npx`/`npm exec`
+wrapper).
+
+Before profiling, the runner also checks that the launch executable is on a
+native Linux filesystem. A `launch_executable` on a WSL2 Windows-drive mount
+(`/mnt/c/...`) or any other slow network/virtio filesystem makes gVisor's
+per-syscall interception too slow for the container to start inside the warm-up
+window, which shows up as `warmup:initialize timed out after 30s`; the runner
+fails fast with that exact explanation. Keep the project (and any venv the
+launch executable points at) on a native path such as `~/mcp-server-exasol`.
+
+For private repositories, the API forwards the short-lived GitHub App
+installation token obtained for the scan; no static `WARDEN_GIT_TOKEN` is
+required. The API never needs the runner's source tree, profile file, `runsc`,
+or Warden binaries. `WARDEN_SOURCE_ROOT` is no longer part of the automated
+flow. The existing profile-upload endpoint remains a manual fallback, not a
+prerequisite for normal registration.
+
+The runner launches `warden-serve` with `WARDEN_SERVER_SOURCE` and
+`WARDEN_SERVER_ID` set as **host-side process environment**, not as `-env`
+injections. `warden-serve` reads those before confinement to resolve the
+server's telemetry identity, so runtime events land under the same server id
+the API uses for registration, manifests, and dashboard queries. `-env` only
+injects variables into the confined guest and is invisible to `warden-serve`
+itself.
 
 
 ## Local setup
@@ -411,6 +487,27 @@ calculation to work correctly.
 
 
 ## Troubleshooting
+
+### Warm pool fails with `warmup:initialize timed out after 30s`
+
+The confined container never answered the MCP `initialize` handshake inside
+the warm-up window. Check in this order:
+
+1. **Slow filesystem.** The launch executable (or its venv/interpreter) is on
+   a WSL2 Windows-drive mount, `/mnt/c/...`, CIFS, NFS, or FUSE. The runner's
+   preflight rejects that before profiling; if you are seeing the raw timeout
+   anyway (manual `warden-serve`, or an older runner), move the project and
+   its venv to a native Linux path, e.g. `~/mcp-server-exasol`, recreate the
+   venv there, and register that path as `launch_executable`.
+2. **Transport mismatch.** The server was launched in `streamable-http`/SSE
+   mode and never reads stdin, so the handshake request is never consumed.
+   Warden drives MCP over stdio; launch a stdio-capable entry point.
+3. **Startup work or blocked I/O.** A server that performs slow network work,
+   lazy JIT/compile steps, or a blocking connect during startup can consume
+   the whole window. Increase `WARDEN_REQUEST_TIMEOUT` and observe the
+   container's trace; a stderr of a consistent import crash instead of a
+   timeout usually means a missing dependency or an unmet required
+   environment variable at import time.
 
 ### `Connection refused` to Exasol
 
