@@ -207,7 +207,10 @@ curl -s -X POST localhost:8000/scan-runs/$RID/llm-analysis-result \
 Status should now read `static_analysis_passed`.
 
 **Refresh Discovery Hub.** The card now lists three tools with descriptions,
-still Offline. Show that the catalog landed in *both* stores under one id:
+still Offline. The sync to both stores runs in the background, so give it a
+second or two if the first refresh looks empty.
+
+Show that the catalog landed in *both* stores under one id:
 
 ```bash
 curl -s localhost:8000/tools | python3 -m json.tool | head -20          # PostgreSQL
@@ -216,6 +219,11 @@ curl -s localhost:8000/servers/$SID/tools | python3 -m json.tool | head -20   # 
 
 **The point:** same `server_id` in both. Registration lives in PostgreSQL,
 telemetry in Exasol, and one identity spans them.
+
+Note the `source` field reads `declared` — these came from static analysis,
+nothing has run yet. After §3 it becomes `observed`, because the running
+server advertised them itself. That distinction is the whole point of the
+column: what the code claims versus what the process actually offered.
 
 ---
 

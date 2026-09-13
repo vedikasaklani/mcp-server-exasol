@@ -4,7 +4,11 @@ from server_management.database.db_models import ScanStatus, LlmVerdict, RuleVer
 class RegisterServerRequest(BaseModel):
     repo_url: str
     installation_id: int
-    allowed_destinations: list[str]
+    # Defaults to fully egress-restricted. Registration establishes identity;
+    # the egress policy and launch command are normally set afterwards, and
+    # making an empty allowlist explicit is both the safe default and the one
+    # that lets a caller register with nothing but a repository.
+    allowed_destinations: list[str] = Field(default_factory=list)
     launch_executable: str = ""
     launch_args: list[str] = Field(default_factory=list)
 
@@ -29,7 +33,12 @@ class ManifestResponse(BaseModel):
 
 
 class UpdateManifestRequest(BaseModel):
-    allowed_destinations: list[str]
+    # Every field is optional because this is a PATCH: update_manifest()
+    # already treats None as "leave unchanged" for each of them. Requiring
+    # allowed_destinations meant a caller could not set a launch command
+    # without also resending the egress policy, and the obvious partial
+    # request - just the launch fields - was rejected as malformed.
+    allowed_destinations: list[str] | None = None
     launch_executable: str | None = None
     launch_args: list[str] | None = None
 
