@@ -67,9 +67,16 @@ def _date_key(dt) -> int:
 
 
 def _ensure_dim_server(exa: pyexasol.ExaConnection, server: Server) -> str:
-    # Exasol identity is keyed by the same normalized repository identity used
-    # by runtime telemetry, rather than by the PostgreSQL UUID.
-    canonical_id = resolve_server(server.repo_url, "github", "", exa=exa)
+    # Pinned to the PostgreSQL server_id explicitly (not derived from
+    # repo_url alone) so this always lands on the same Exasol identity the
+    # runtime/telemetry path uses for the same server - deriving both sides
+    # independently from repo_url looks equivalent but silently isn't: the
+    # runtime path's ResolveAs call uses kind="command", this one uses
+    # kind="github", and uuid5(kind:source) differs by kind. Without a
+    # shared canonical id, static-analysis facts and runtime facts for the
+    # same real server land under two different SERVER_IDs in Exasol -
+    # confirmed by reproducing it via the dashboard, not by inspection.
+    canonical_id = resolve_server(server.repo_url, "github", "", server.server_id, exa=exa)
     exa.execute(
         """
         MERGE INTO DIM_SERVER t
@@ -152,7 +159,7 @@ def sync_scan_run(pg_session: Session, scan_run_id: str) -> None:
 
     exa = _connect()
     try:
-        canonical_id = resolve_server(run.server.repo_url, "github", "", exa=exa)
+        canonical_id = resolve_server(run.server.repo_url, "github", "", run.server.server_id, exa=exa)
         exa.execute(
             """
             MERGE INTO FACT_SCAN_RUN t
@@ -212,7 +219,7 @@ def sync_latest_manifest_history(pg_session: Session, server_id: str) -> None:
 
     exa = _connect()
     try:
-        canonical_id = resolve_server(server.repo_url, "github", "", exa=exa)
+        canonical_id = resolve_server(server.repo_url, "github", "", server.server_id, exa=exa)
         exa.execute(
             """
             MERGE INTO FACT_MANIFEST_HISTORY t
@@ -248,7 +255,7 @@ def sync_llm_phase_findings(pg_session: Session, scan_run_id: str) -> None:
 
     exa = _connect()
     try:
-        canonical_id = resolve_server(run.server.repo_url, "github", "", exa=exa)
+        canonical_id = resolve_server(run.server.repo_url, "github", "", run.server.server_id, exa=exa)
         date_key = _date_key(result.reviewed_at)
         rows = []
         for f in findings:

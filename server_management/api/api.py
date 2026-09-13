@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -57,6 +58,18 @@ from server_management.services.sync import (
 )
 
 app = FastAPI()
+# The dashboard is a browser app on its own origin (localhost:3000 in dev,
+# whatever it's deployed to in prod) calling this API directly - without
+# this, every request fails at the browser's CORS check before it even
+# reaches a route. This is an internal ops tool behind its own network
+# controls, not a public multi-tenant API, so a wide-open origin list is
+# the right tradeoff here rather than hardcoding a deploy-specific origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(githubapp.router)
 app.include_router(frontend.router)
 app.include_router(telemetry_router)

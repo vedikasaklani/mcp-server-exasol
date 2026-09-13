@@ -5,10 +5,10 @@ This document is for whoever owns `hostconfig`. It explains what landed on
 left for you to do to bring it into `hostconfig`. `hostconfig` itself has not
 been touched — everything below lives only on `code-functionality`.
 
-**Status:** the tool-calling + discovery/audit/reputation/telemetry backend is
-complete and battle-tested against real MCP servers. The only remaining work
-before this is a usable product is frontend integration (see "What's left"
-at the bottom).
+**Status:** the tool-calling + discovery/audit/reputation/telemetry backend
+*and* a dashboard frontend (`dashboard/`, §8) are both complete and
+battle-tested end to end against real MCP servers, including through the
+browser. What's left (§10) needs credentials only you have, not more code.
 
 ## 0. Troubleshooting: `warmup:initialize timed out after 30s` / `timed out after 15s waiting for canary handshake`
 
@@ -101,6 +101,7 @@ alembic/, alembic.ini                # Postgres migrations
 Dockerfile, .dockerignore
 requirements.txt, warden-runner-requirements.txt
 scripts/warden_healthcheck.py, .ps1
+dashboard/                            # Next.js + Tailwind frontend, calls api.py directly (see §8)
 ```
 
 The Go side (`Exasol/cmd/*`, `Exasol/sandbox/*`) is unchanged in structure;
@@ -257,6 +258,28 @@ network policy will not grant anyway. This is why bug #12's fix installs
 dependencies **before** confinement starts, rather than trying to let the
 entrypoint fetch its own dependencies live inside the sandbox — that
 was never going to work, by design (§4.2/§6.1 of `docs/ARCHITECTURE.md`).
+
+13. **Postgres-registered servers and their runtime telemetry landed under
+    two different Exasol `SERVER_ID`s.** `sync.py`'s four `resolve_server()`
+    calls derived Exasol identity purely from `repo_url` (deliberately, per
+    a comment explaining it was meant to match runtime telemetry's own
+    derivation) - but `warden-serve`'s `ResolveAs` call uses `kind="command"`
+    while `sync.py` uses `kind="github"`, and `uuid5(kind:source)` differs
+    by kind. The two sides were never actually going to agree, with or
+    without bug #9's fix. Caught by building the dashboard and watching the
+    same real server show up twice - once with static-analysis/manifest
+    facts and a `null` reputation, once with runtime facts and a real
+    score - with no way to tell a human they were the same server. Fixed by
+    passing the Postgres `server.server_id` as `canonical_server_id` at all
+    four `sync.py` call sites, the same fix bug #9 already applied on the
+    runtime side - Postgres's own UUID is now the one shared identity
+    everywhere, which is more robust than trying to keep two independent
+    derivations in agreement. **If you've deployed a version of this
+    without this fix, expect duplicate `DIM_SERVER` rows for any server
+    that went through both a scan and a live session** - safe to
+    deduplicate by keeping the row with actual data and re-pointing
+    dependent facts, or simplest, reset a non-production Exasol schema per
+    §4.
 
 ## 3. Known issues, not fixed (flagging for you)
 
@@ -646,7 +669,72 @@ go build ./...
 go test ./...
 ```
 
-## 8. What's left — next step is frontend integration
+## 8. The dashboard (`dashboard/`)
+
+A Next.js + Tailwind frontend now lives at `dashboard/` — dark-mode-first,
+sidebar navigation, four views (Overview, Discovery Hub, Audit & Activity,
+Security Controls), calling the real backend directly from the browser (no
+mock data layer, no server-side proxy). Full details, structure, and what's
+live vs. still a labeled "Preview" panel: `dashboard/README.md`.
+
+```bash
+cd dashboard
+npm install
+cp .env.example .env.local   # NEXT_PUBLIC_API_BASE_URL, default localhost:8000
+npm run dev                  # http://localhost:3000
+```
+
+Requires CORS on the backend, which `api.py` now has (`CORSMiddleware`,
+wide-open origin — this is an internal ops tool, not a public API, so that's
+the right tradeoff rather than hardcoding a deploy-specific origin).
+
+Battle-tested end to end, not just built: registered a server, patched its
+manifest, ran a real session through `warden_runner.py`, and used the
+dashboard's own "Try it" button to make a live tool call through the browser
+→ `api.py` → `warden-serve` → confined process → back - genuine result, not
+a stub, verified via screenshot. Testing this surfaced bug #13 above (the
+Postgres/Exasol identity split), which would otherwise have shown up as
+"same server listed twice with no reputation" the first time anyone actually
+looked at a populated dashboard - exactly the kind of thing worth building
+the UI before calling the backend done.
+
+## 9. Exposing the backend publicly (ngrok) — for the GitHub App webhook
+
+The other developer's GitHub App needs a public URL to deliver webhook
+events to `POST /github/webhook` on this backend (`githubapp.router`,
+mounted in `api.py`) - `api.py` running on `localhost:8000` isn't reachable
+from GitHub's servers on its own. ngrok tunnels it.
+
+```bash
+# one-time setup (needs a free ngrok account - can't be done on your behalf,
+# it requires your own email/verification)
+#   1. sign up: https://dashboard.ngrok.com/signup
+#   2. grab your authtoken: https://dashboard.ngrok.com/get-started/your-authtoken
+ngrok config add-authtoken <your-token>
+
+# with api.py running on port 8000:
+ngrok http 8000
+```
+
+ngrok prints a `https://<random>.ngrok-free.app` URL. Give the other
+developer that URL with `/github/webhook` appended
+(`https://<random>.ngrok-free.app/github/webhook`) to put in the GitHub
+App's Webhook URL field. Two things worth knowing:
+
+- **The URL changes every time you restart ngrok** on the free plan - if the
+  webhook stops arriving, this is the first thing to check. A paid plan or
+  `ngrok http --domain=<reserved-domain> 8000` gets a stable one.
+- **`GITHUB_WEBHOOK_SECRET` must match** what's configured on the GitHub
+  App's webhook, or `githubapp.py` will reject every delivery as an invalid
+  signature (by design - that's the fail-closed check that stops anyone else
+  from posting fake webhook events at your public ngrok URL).
+
+The ngrok binary itself is already fetched and working in this environment
+(`~/.local/bin/ngrok`, v3.39.11) - confirmed it starts and correctly demands
+an authtoken (`ERR_NGROK_4018`), which is the expected state before you add
+your own.
+
+## 10. What's left — next step is nothing structural, just credentials and polish
 
 Backend-side, this branch is feature-complete for what was asked:
 
@@ -680,20 +768,26 @@ Backend-side, this branch is feature-complete for what was asked:
   real GitHub App credentials are configured (not testable without them —
   everything downstream of registration was verified using synthetic
   registrations and a local git remote instead of a live webhook).
+- ✅ **A frontend dashboard exists and is wired to all of the above** (§8) -
+  Overview, Discovery Hub, Audit & Activity, Security Controls, dark-mode,
+  battle-tested against the live backend including a real end-to-end tool
+  call made through the browser.
 
-What's not done, and is genuinely next:
+What's not done, and is genuinely next - none of it structural, all of it
+either needs credentials only you have, or is explicitly-labeled polish:
 
-1. **Frontend integration.** Nothing here has a UI. §6 is the complete API
-   surface a frontend should build against — discovery, audit, reputation,
-   real-time execution, monitoring, and the global tool catalog are all
-   there and battle-tested.
-2. **Real GitHub App credentials**, to exercise the webhook → scan pipeline
+1. **Real GitHub App credentials**, to exercise the webhook → scan pipeline
    → automatic-reconciliation path for real, end to end in one continuous
    flow, instead of via synthetic `POST /servers` plus a manually-driven
    `warden_runner.py` session as was used here to prove the mechanism works.
-3. **A production Exasol schema decision** per §4, if `hostconfig`'s
+   §9 covers exposing the backend publicly via ngrok for this.
+2. **A production Exasol schema decision** per §4, if `hostconfig`'s
    instance has history predating this schema.
-4. Whatever `hostconfig` needs to actually run `warden_runner.py` on its own
+3. Whatever `hostconfig` needs to actually run `warden_runner.py` on its own
    host (git, runsc, built warden binaries) rather than the same machine as
    `api.py` — the two are already split into separate processes/services for
    exactly this reason.
+4. The two panels on the dashboard's Security Controls page explicitly
+   marked "Preview" (rate limits, per-tool allowed scopes) - real UI, no
+   backend enforcement behind them yet. Everything else on the dashboard is
+   fully live.
