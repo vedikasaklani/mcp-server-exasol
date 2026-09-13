@@ -8,6 +8,7 @@ import traceback
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server_management.api.github_auth import get_installation_token
@@ -63,13 +64,28 @@ async def github_register(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    server = register_server(
-        db, repo_url=req.repo_url,
-        installation_id=req.installation_id,
-        allowed_destinations=req.allowed_destinations,
-        launch_executable=req.launch_executable,
-        launch_args=req.launch_args,
-    )
+    # Both of these surface as an opaque 500 otherwise: a malformed repo_url
+    # (ValueError, from normalize_repo_url) or re-registering a repo already
+    # onboarded (IntegrityError, from the servers.repo_url unique constraint)
+    # are the two overwhelmingly common ways this is refused - mirrors
+    # api.py's api_register_server, which has the same failure modes.
+    try:
+        server = register_server(
+            db, repo_url=req.repo_url,
+            installation_id=req.installation_id,
+            allowed_destinations=req.allowed_destinations,
+            launch_executable=req.launch_executable,
+            launch_args=req.launch_args,
+            env=req.env,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"{req.repo_url} is already registered",
+        ) from exc
     background_tasks.add_task(
         start_initial_scan,
         server.server_id,
@@ -148,14 +164,33 @@ def github_setup(request: Request):
         <input type="text" id="repo_url" placeholder="https://github.com/you/repo.git" style="width:100%" required><br><br>
         <label>Allowed destinations (comma-separated)</label><br>
         <input type="text" id="allowed_destinations" placeholder="api.example.com, api.stripe.com" style="width:100%" required><br><br>
-        <label>Executable</label><br>
-        <input type="text" id="launch_executable" placeholder="python3" style="width:100%" required><br><br>
+        <label>Executable (leave blank if your repo has a <code>stdio_server.py</code> at its root - it's detected automatically after the first scan)</label><br>
+        <input type="text" id="launch_executable" placeholder="python3" style="width:100%"><br><br>
         <label>Arguments (one per line)</label><br>
         <textarea id="launch_args" placeholder="-m&#10;my_mcp_server" style="width:100%"></textarea><br><br>
+        <label>Environment (optional, one KEY=VALUE per line)</label><br>
+        <p style="font-size:12px;color:#666;margin:2px 0 6px;">Only needed to run this server confined - the sandboxed process gets these as its environment. Never sent anywhere but this registration.</p>
+        <textarea id="env" placeholder="DATABASE_URL=...&#10;API_KEY=..." style="width:100%"></textarea><br><br>
         <button type="submit">Register</button>
       </form>
       <p id="result"></p>
       <script>
+        function parseEnv(text) {{
+          const env = {{}};
+          for (const rawLine of text.split('\\n')) {{
+            const line = rawLine.trim();
+            if (!line || line.startsWith('#')) continue;
+            const eq = line.indexOf('=');
+            if (eq === -1) continue;
+            const key = line.slice(0, eq).trim();
+            let val = line.slice(eq + 1).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {{
+              val = val.slice(1, -1);
+            }}
+            if (key) env[key] = val;
+          }}
+          return env;
+        }}
         document.getElementById('register-form').addEventListener('submit', async (e) => {{
           e.preventDefault();
           const payload = {{
@@ -166,6 +201,7 @@ def github_setup(request: Request):
             launch_executable: document.getElementById('launch_executable').value.trim(),
             launch_args: document.getElementById('launch_args').value
               .split('\\n').map(s => s.trim()).filter(Boolean),
+            env: parseEnv(document.getElementById('env').value),
           }};
           const resp = await fetch('/github/register', {{
             method: 'POST',

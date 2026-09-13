@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -92,6 +93,7 @@ class SessionRequest(BaseModel):
     commit_sha: str = Field(min_length=7, max_length=64)
     executable: str = Field(min_length=1)
     args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     git_token: SecretStr | None = Field(default=None, min_length=1)
     approver: str = Field(default="vedika", min_length=1, max_length=100)
 
@@ -388,11 +390,18 @@ class Runner:
                 "see sandbox/fetch's package doc for the tradeoff)",
                 flush=True,
             )
-            _run(
-                ["python3", "-m", "pip", "install", "--user", "--break-system-packages",
-                 "-r", "requirements.txt"],
-                cwd=source_dir, timeout=install_timeout,
-            )
+            # --user/--break-system-packages target a bare system Python's
+            # externally-managed site-packages. Inside an active virtualenv
+            # (which is how this runner itself is commonly launched) pip
+            # refuses --user outright ("User site-packages are not visible
+            # in this virtualenv"), so detect that case and fall back to a
+            # plain install into the venv's own site-packages instead.
+            in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+            pip_cmd = ["python3", "-m", "pip", "install"]
+            if not in_venv:
+                pip_cmd += ["--user", "--break-system-packages"]
+            pip_cmd += ["-r", "requirements.txt"]
+            _run(pip_cmd, cwd=source_dir, timeout=install_timeout)
 
     def _observe(self, source_dir: str, profile: Path, request: SessionRequest) -> None:
         observe = os.environ.get("WARDEN_OBSERVE_BIN")
@@ -434,6 +443,8 @@ class Runner:
         request_timeout = os.environ.get("WARDEN_REQUEST_TIMEOUT")
         if request_timeout:
             command += ["-request-timeout", request_timeout]
+        for key, value in request.env.items():
+            command += ["-env", f"{key}={value}"]
         command += ["--", request.executable, *request.args]
         # WARDEN_SERVER_SOURCE/WARDEN_SERVER_ID are read by warden-serve's own
         # HOST-side process (cmd/warden-serve/main.go, before any confinement

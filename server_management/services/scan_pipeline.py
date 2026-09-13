@@ -22,10 +22,12 @@ from server_management.database.db_models import (
     ScanRun,
     ScanStatus,
     Server,
+    ServerManifest,
 )
 from server_management.services.onboard_services import (
     record_llm_analysis_result,
     record_rule_analysis_result,
+    update_manifest,
 )
 from server_management.services.static_analysis import (
     extract_tool_declarations,
@@ -74,6 +76,34 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
         detail = e.stderr if isinstance(e, subprocess.CalledProcessError) else str(e)
         raise RuntimeError(f"git clone/checkout failed: {_sanitize(detail)}") from e
     return workdir
+
+
+STDIO_ENTRYPOINT_NAME = "stdio_server.py"
+
+
+def _detect_stdio_entrypoint(repo_path: str, server_id: str) -> None:
+    """Auto-configure the confinement launch command from a well-known
+    entrypoint filename convention, if present at the repo root.
+
+    This is what lets a git-sourced server be confined without a dedicated
+    manifest field for the entrypoint path (mirrors the npm-source shortcut
+    in warden_session_manager.reconcile_server, which infers `node` rather
+    than asking an operator to restate it). Only fires when nothing is
+    configured yet, so it never clobbers a launch command someone set by
+    hand."""
+    if not os.path.isfile(os.path.join(repo_path, STDIO_ENTRYPOINT_NAME)):
+        return
+    with session_scope() as db:
+        manifest = db.get(ServerManifest, server_id)
+        if manifest is None or manifest.launch_executable:
+            return
+        update_manifest(
+            db, server_id,
+            launch_executable="python3",
+            launch_args=[STDIO_ENTRYPOINT_NAME],
+            change_reason="stdio_entrypoint_detected",
+        )
+        print(f"detected {STDIO_ENTRYPOINT_NAME} for {server_id}; launch command auto-configured")
 
 
 def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
@@ -154,6 +184,8 @@ async def trigger_scan(scan_run_id: str) -> None:
         except Exception as e:
             await scan_fail(scan_run_id, reason=str(e))
             return
+
+        await asyncio.to_thread(_detect_stdio_entrypoint, repo_path, run.server_id)
 
         # Phase 1: rule-based
         _set_status(scan_run_id, ScanStatus.RULE_ANALYSIS_RUNNING)

@@ -124,10 +124,11 @@ def normalize_repo_url(repo_url: str) -> str:
 def register_server(session: Session, repo_url: str, installation_id: int,
                      allowed_destinations: list[str],
                      launch_executable: str = "",
-                     launch_args: list[str] | None = None) -> Server:
+                     launch_args: list[str] | None = None,
+                     env: dict[str, str] | None = None) -> Server:
     server = Server(repo_url=normalize_repo_url(repo_url), installation_id=installation_id)
     session.add(server)
-    session.flush() 
+    session.flush()
 
     session.add(ServerManifest(
         server_id=server.server_id,
@@ -135,6 +136,7 @@ def register_server(session: Session, repo_url: str, installation_id: int,
         tool_declarations=None,   #unknown until first static analysis pass extracts it
         launch_executable=launch_executable.strip() or None,
         launch_args=launch_args or [],
+        env=env or {},
         version=1,
     ))
     session.add(ManifestHistory(
@@ -331,15 +333,27 @@ def get_server_scan_detail(
     }
 
 
-def get_server_by_repo_and_installation(session:Session, repo_url:str, installation_id:int):
+def get_server_by_repo_and_installation(session: Session, repo_url: str, installation_id: int):
+    """Look up a server for a webhook delivery.
+
+    repo_url alone is the real identity here - servers.repo_url already has
+    a unique constraint, so a second registration for the same repo is
+    refused regardless of installation_id. Requiring installation_id to
+    also match on lookup only breaks the pairing: GitHub issues a new
+    installation_id on every (re)install, so an app reinstall would
+    otherwise leave a correctly-registered repo invisible to its own
+    webhooks with nothing but a silent "unregistered server" log line to
+    show for it. Self-heal instead: match on repo_url, and adopt whatever
+    installation_id the webhook reports.
+    """
     server = (
         session.query(Server)
-        .filter(
-            Server.repo_url == normalize_repo_url(repo_url),
-            Server.installation_id == installation_id
-        )
+        .filter(Server.repo_url == normalize_repo_url(repo_url))
         .first()
     )
+    if server is not None and server.installation_id != installation_id:
+        server.installation_id = installation_id
+        session.commit()
     return server
 
 def update_manifest(session: Session, server_id: str, *,
@@ -347,6 +361,7 @@ def update_manifest(session: Session, server_id: str, *,
                      tool_declarations: list[dict] | None = None,
                      launch_executable: str | None = None,
                      launch_args: list[str] | None = None,
+                     env: dict[str, str] | None = None,
                      change_reason: str) -> ServerManifest:
     manifest = session.get(ServerManifest, server_id)
     if manifest is None:
@@ -360,6 +375,8 @@ def update_manifest(session: Session, server_id: str, *,
         manifest.launch_executable = launch_executable.strip() or None
     if launch_args is not None:
         manifest.launch_args = launch_args
+    if env is not None:
+        manifest.env = env
     if launch_executable is not None or launch_args is not None:
         manifest.warden_profile_path = None
         manifest.warden_approved_by = None
