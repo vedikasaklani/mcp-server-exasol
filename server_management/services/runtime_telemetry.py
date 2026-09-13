@@ -373,9 +373,16 @@ def get_tools(server_id: str) -> list[dict[str, Any]]:
     try:
         rows = exa.execute(
             """
+            -- DIM_TOOL is also the dimension every runtime event joins to,
+            -- so it necessarily gains a row for any tool name an agent
+            -- *attempts* - including names the server rejects as unknown.
+            -- Those are real audit history but they are not part of the
+            -- server's catalog, and listing them invites an operator to
+            -- call a tool that does not exist. Only names something
+            -- actually declared or advertised carry a DISCOVERY_SOURCE.
             SELECT TOOL_NAME, DESCRIPTION, PARAMETER_SCHEMA, DISCOVERY_SOURCE, UPDATED_AT
             FROM DIM_TOOL
-            WHERE SERVER_ID = {server_id}
+            WHERE SERVER_ID = {server_id} AND DISCOVERY_SOURCE IS NOT NULL
             ORDER BY TOOL_NAME
             """,
             {"server_id": server_id},

@@ -62,13 +62,28 @@ class WardenSessionManager:
                 return None
             if latest.status not in _READY_STATUSES or not manifest.launch_executable:
                 return None
-            cached = self.get_address(server_id)
-            if cached is not None:
-                with self._lock:
-                    if self._sessions.get(server_id, ("",))[0] == latest.commit_sha:
-                        return cached
+            # The runner owns the real session state. Ask it before starting
+            # anything: this process may have restarted, or the session may
+            # have been started against the runner directly, and in both
+            # cases a healthy gateway would otherwise be reported offline
+            # and then needlessly torn down and rebuilt.
+            adopted = self._adopt_runner_session(server_id, latest.commit_sha)
+            if adopted is not None:
+                return adopted
             if git_token is None:
-                git_token = self._get_installation_token(server.installation_id)
+                # A token is only needed for private repositories. Treating a
+                # failed exchange as fatal means a misconfigured or absent
+                # GitHub App takes down live sessions for public repos too,
+                # which is the overwhelmingly common case here.
+                try:
+                    git_token = self._get_installation_token(server.installation_id)
+                except Exception as exc:
+                    print(
+                        f"GitHub token exchange failed for {server_id}; "
+                        f"continuing unauthenticated: {exc}",
+                        flush=True,
+                    )
+                    git_token = None
             result = self._start_runner_session(
                 server_id=server_id,
                 repo_url=server.repo_url,
@@ -83,9 +98,74 @@ class WardenSessionManager:
                 self._sessions[server_id] = (latest.commit_sha, address)
             return address
 
+    def live_address(self, server_id: str) -> str | None:
+        """The gateway address if one is up right now, without starting one.
+
+        Used by status/metrics reads, which must never have the side effect
+        of launching a sandbox. Falls back to the runner so a restarted API
+        still sees sessions it did not itself start.
+        """
+        # Ask the runner first rather than trusting the cache. The runner is
+        # the only process that knows whether the gateway is still up, and a
+        # session it has dropped (crash, restart, explicit stop) would
+        # otherwise leave this cache pointing at a dead address indefinitely,
+        # so every call would fail against a server the UI still shows live.
+        # It is a local request on the critical path, so fall back to the
+        # cache if the runner itself is unreachable.
+        confirmed = self._adopt_runner_session(server_id, commit_sha=None)
+        if confirmed is not None:
+            return confirmed
+        if self._runner_reachable():
+            with self._lock:
+                self._sessions.pop(server_id, None)
+            return None
+        return self.get_address(server_id)
+
+    def _runner_reachable(self) -> bool:
+        runner_url = os.environ.get("WARDEN_RUNNER_URL")
+        if not runner_url:
+            return False
+        try:
+            httpx.get(f"{runner_url.rstrip('/')}/docs", timeout=5.0)
+            return True
+        except httpx.RequestError:
+            return False
+
+    def _adopt_runner_session(self, server_id: str, commit_sha: str | None) -> str | None:
+        """Re-attach to a live gateway the runner already has for this commit."""
+        runner_url = os.environ.get("WARDEN_RUNNER_URL")
+        if not runner_url:
+            return None
+        headers = {}
+        token = os.environ.get("WARDEN_RUNNER_TOKEN")
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        try:
+            response = httpx.get(
+                f"{runner_url.rstrip('/')}/sessions/{server_id}",
+                headers=headers,
+                timeout=10.0,
+            )
+        except httpx.RequestError:
+            return None
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        session_sha = payload.get("commit_sha")
+        # A caller that named a commit wants that exact build; a status read
+        # passes None and will take whatever is actually running.
+        if commit_sha is not None and session_sha != commit_sha:
+            return None
+        address = payload.get("address")
+        if not address or not session_sha:
+            return None
+        with self._lock:
+            self._sessions[server_id] = (session_sha, address)
+        return address
+
     def _start_runner_session(
         self, *, server_id: str, repo_url: str, commit_sha: str,
-        executable: str, args: list[str], git_token: str,
+        executable: str, args: list[str], git_token: str | None,
     ) -> dict[str, Any]:
         runner_url = os.environ.get("WARDEN_RUNNER_URL")
         if not runner_url:

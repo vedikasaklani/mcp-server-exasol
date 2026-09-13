@@ -299,8 +299,13 @@ func detectGo(ctx context.Context, dir string) (*Entrypoint, error) {
 	}
 
 	out := filepath.Join(dir, ".warden-launch-bin")
-	notes = append(notes, "ran: go build -o "+out+" "+mainPath)
-	if err := run(ctx, dir, "go", "build", "-o", out, mainPath); err != nil {
+	// A cloned project may live below another Git worktree (as it does in
+	// tests and in some CI runners). In that case Go's default VCS stamping
+	// can fail even though the target module itself is perfectly buildable.
+	// The binary is an ephemeral launch artifact, so it carries no release
+	// provenance that needs stamping.
+	notes = append(notes, "ran: go build -buildvcs=false -o "+out+" "+mainPath)
+	if err := run(ctx, dir, "go", "build", "-buildvcs=false", "-o", out, mainPath); err != nil {
 		return nil, fmt.Errorf("fetch: go build: %w", err)
 	}
 	return &Entrypoint{Command: []string{out}, Cwd: dir, Kind: "go", Notes: notes}, nil

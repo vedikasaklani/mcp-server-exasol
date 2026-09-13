@@ -213,7 +213,7 @@ func run(args []string) error {
 		if source == "" {
 			source = command[0]
 		}
-		serverID := storage.ResolveAs(
+		serverID, resolveErr := storage.ResolveAsErr(
 			resolveCtx, source, "command", "", os.Getenv("WARDEN_SERVER_ID"),
 		)
 		resolveCancel()
@@ -225,8 +225,8 @@ func run(args []string) error {
 			fmt.Printf("telemetry enabled: server_id=%s\n", serverID)
 		} else {
 			fmt.Fprintf(os.Stderr,
-				"telemetry unavailable at %s for source %q; runtime events will not be stored\n",
-				*telemetryAPI, source)
+				"telemetry unavailable at %s for source %q; runtime events will not be stored: %v\n",
+				*telemetryAPI, source, resolveErr)
 		}
 	}
 

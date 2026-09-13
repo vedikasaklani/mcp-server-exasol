@@ -307,6 +307,30 @@ func (c *Client) Resolve(ctx context.Context, source, kind, ref string) string {
 	return c.resolve(ctx, source, kind, ref, "")
 }
 
+// ResolveAsErr is ResolveAs with the failure reason preserved. Callers that
+// report telemetry status to an operator need it: "runtime events will not
+// be stored" is not actionable without saying whether the service refused
+// the request, timed out, or was never listening.
+func (c *Client) ResolveAsErr(ctx context.Context, source, kind, ref, canonicalID string) (string, error) {
+	if !c.Enabled() {
+		return "", fmt.Errorf("registry: storage disabled")
+	}
+	var out struct {
+		ServerID string `json:"server_id"`
+	}
+	body := map[string]string{"source": source, "kind": kind, "ref": ref}
+	if canonicalID != "" {
+		body["canonical_server_id"] = canonicalID
+	}
+	if err := c.post(ctx, "/servers/resolve", body, &out); err != nil {
+		return "", err
+	}
+	if out.ServerID == "" {
+		return "", fmt.Errorf("registry: /servers/resolve returned no server_id")
+	}
+	return out.ServerID, nil
+}
+
 // ResolveAs resolves telemetry using an externally owned canonical identity,
 // such as the PostgreSQL server_id. This keeps static and runtime facts
 // joinable instead of creating a second identity from the source string.

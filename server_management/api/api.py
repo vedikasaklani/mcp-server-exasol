@@ -15,6 +15,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server_management.api import frontend, githubapp
@@ -34,6 +35,7 @@ from server_management.api.models import (
 from server_management.database.db_config import get_db, session_scope
 from server_management.database.db_models import (
     ScanRun,
+    Server,
     ServerManifest,
 )
 from server_management.services.onboard_services import (
@@ -48,6 +50,7 @@ from server_management.services.onboard_services import (
     approve_warden_profile,
     store_warden_profile,
 )
+from server_management.services.runtime_telemetry import resolve_server
 from server_management.services.tool_catalog import list_tools
 from server_management.services.warden_session_manager import warden_sessions
 from server_management.services.sync import (
@@ -70,6 +73,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registered before the routers so it wins the match against the telemetry
+# router's own /health, which reports `postgres: false` unconditionally
+# because that module is deliberately Postgres-free. This app owns both
+# stores, so its health check has to actually probe both - a dashboard that
+# says "healthy" while Postgres is down is worse than no health check.
+@app.get("/health")
+def health() -> dict[str, Any]:
+    exasol_ok = False
+    try:
+        import pyexasol
+
+        exa = pyexasol.connect(
+            dsn=os.environ["EXASOL_DSN"],
+            user=os.environ["EXASOL_USER"],
+            password=os.environ["EXASOL_PASSWORD"],
+        )
+        exa.execute("SELECT 1").fetchval()
+        exa.close()
+        exasol_ok = True
+    except Exception:
+        exasol_ok = False
+
+    postgres_ok = False
+    try:
+        from sqlalchemy import text
+
+        with session_scope() as db:
+            db.execute(text("SELECT 1"))
+        postgres_ok = True
+    except Exception:
+        postgres_ok = False
+
+    return {
+        "status": "ok" if (exasol_ok and postgres_ok) else "degraded",
+        "exasol": exasol_ok,
+        "postgres": postgres_ok,
+    }
+
+
 app.include_router(githubapp.router)
 app.include_router(frontend.router)
 app.include_router(telemetry_router)
@@ -79,7 +122,23 @@ app.include_router(telemetry_router)
 def recover_interrupted_scans():
     with session_scope() as db:
         mark_interrupted_scans_failed(db)
+        _backfill_telemetry_identities(db)
     warden_sessions.reconcile_all()
+
+
+def _backfill_telemetry_identities(db: Session) -> None:
+    """Make sure every registered server exists in the telemetry store.
+
+    Registration seeds this inline, but servers registered before that was
+    the case - or during an Exasol outage - would otherwise stay invisible
+    to every Exasol-backed endpoint forever. resolve_server is an upsert
+    pinned to the PostgreSQL UUID, so re-running it is free and idempotent.
+    """
+    for server in db.query(Server).all():
+        try:
+            resolve_server(server.repo_url, "github", "", server.server_id)
+        except Exception:
+            continue
 
 
 def _manifest_response(manifest: ServerManifest) -> ManifestResponse:
@@ -105,13 +164,44 @@ def api_register_server(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    server = register_server(
-        db, repo_url=req.repo_url,
-        installation_id=req.installation_id,
-        allowed_destinations=req.allowed_destinations,
-        launch_executable=req.launch_executable,
-        launch_args=req.launch_args,
-    )
+    # Both of these surface as an opaque 500 otherwise, which reaches the
+    # dashboard as a bare "Registration failed" with nothing an operator can
+    # act on. They are the two overwhelmingly common ways registration is
+    # refused, so each gets a status code and a message that says what to fix.
+    try:
+        server = register_server(
+            db, repo_url=req.repo_url,
+            installation_id=req.installation_id,
+            allowed_destinations=req.allowed_destinations,
+            launch_executable=req.launch_executable,
+            launch_args=req.launch_args,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"{req.repo_url} is already registered",
+        ) from exc
+    # Seed the Exasol side of the identity immediately, pinned to the
+    # PostgreSQL UUID. Without this a server only becomes visible to the
+    # telemetry store once a scan run syncs - so with no GitHub App
+    # credentials configured (or any scan failure) it would stay invisible
+    # to every Exasol-backed endpoint, including the dashboard's server
+    # list, despite being perfectly registered here.
+    try:
+        resolve_server(
+            server.repo_url,
+            "github",
+            "",
+            server.server_id,
+        )
+    except Exception:
+        # Registration is authoritative in PostgreSQL; a telemetry-store
+        # hiccup must not fail it. The scan-run sync path re-resolves with
+        # the same canonical id, so this self-heals.
+        pass
     background_tasks.add_task(
         githubapp.start_initial_scan,
         server.server_id,
@@ -208,7 +298,20 @@ def _gateway_address(server_id: str) -> str:
     session on demand if none is cached yet - a dashboard shouldn't have to
     know or care whether a server's confined process happens to be warm
     already."""
-    address = warden_sessions.get_address(server_id) or warden_sessions.reconcile_server(server_id)
+    try:
+        address = warden_sessions.live_address(server_id) or warden_sessions.reconcile_server(
+            server_id
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Bringing a sandbox up touches git, npm and gVisor, any of which
+        # can fail for reasons an operator needs to read. Surfacing that as
+        # a bare 500 with the text only in the server log makes the
+        # dashboard's "couldn't start" state undiagnosable.
+        raise HTTPException(
+            status_code=502, detail=f"could not start a Warden session: {exc}"
+        ) from exc
     if not address:
         raise HTTPException(
             status_code=503,
@@ -262,7 +365,7 @@ def api_live_status(server_id: str):
     """Whether a Warden gateway is actually up for this server right now -
     the dashboard's "is this thing running" indicator, distinct from
     whether it has ever run (that's GET /servers/{id}/trust-score)."""
-    address = warden_sessions.get_address(server_id)
+    address = warden_sessions.live_address(server_id)
     if not address:
         return {"running": False, "address": None}
     try:
@@ -278,7 +381,7 @@ def api_live_metrics(server_id: str):
     counts, latency, container pool state - for the dashboard's real-time
     monitoring view. Complements the historical per-session summaries in
     GET /servers/{id}/sessions."""
-    address = warden_sessions.get_address(server_id)
+    address = warden_sessions.live_address(server_id)
     if not address:
         raise HTTPException(status_code=503, detail="no active Warden session for this server")
     try:

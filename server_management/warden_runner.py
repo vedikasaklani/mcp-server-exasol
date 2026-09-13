@@ -16,6 +16,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -138,6 +139,7 @@ class Runner:
             self._observe(source_dir, profile, request)
             address = self._allocate_address(request.server_id)
             process = self._serve(source_dir, profile, address, request)
+            self._wait_until_serving(address, process)
             self._sessions[request.server_id] = _Session(
                 process, request.commit_sha, address, source_dir
             )
@@ -153,6 +155,53 @@ class Runner:
                 profile_path=str(profile),
                 address=address,
                 reused=False,
+            )
+
+    @staticmethod
+    def _wait_until_serving(address: str, process: subprocess.Popen) -> None:
+        """Block until the gateway actually accepts connections.
+
+        warden-serve has to warm a pool of confined containers before it
+        binds, so it is not reachable the instant Popen returns. Reporting
+        the session as started before then hands the caller an address that
+        refuses connections, and the first tool call after bringing a server
+        live fails for no reason the operator can see.
+        """
+        host, _, port = address.rpartition(":")
+        deadline = time.monotonic() + float(
+            os.environ.get("WARDEN_SERVE_READY_TIMEOUT", "120")
+        )
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"warden-serve exited with code {process.returncode} "
+                    "before it began serving"
+                )
+            try:
+                with socket.create_connection((host, int(port)), timeout=2):
+                    return
+            except OSError:
+                time.sleep(0.25)
+        raise RuntimeError(f"warden-serve did not start serving on {address} in time")
+
+    def lookup(self, server_id: str) -> SessionResponse | None:
+        """Report a live session without starting one.
+
+        The runner is the only process that actually knows which gateways
+        are up. Without a read-only view of that, a restarted API - or one
+        that simply never started this session itself - has no way to reach
+        a perfectly healthy gateway, and reports the server as offline.
+        """
+        with self._lock:
+            current = self._sessions.get(server_id)
+            if current is None or current.process.poll() is not None:
+                return None
+            return SessionResponse(
+                server_id=server_id,
+                commit_sha=current.commit_sha,
+                profile_path=str(self._profile_path(server_id, current.commit_sha)),
+                address=current.address,
+                reused=True,
             )
 
     def stop(self, server_id: str) -> None:
@@ -341,13 +390,21 @@ class Runner:
 
 
 def _clone_url(repo_url: str) -> str:
+    """Resolve a stored ``owner/repo`` (or full URL) to something git can clone.
+
+    WARDEN_GIT_BASE_URL redirects the ``owner/repo`` form at a different
+    host, which is what GitHub Enterprise, an internal mirror, or a local
+    test fixture all need. Full URLs are already unambiguous and pass
+    through untouched.
+    """
+    base_url = os.environ.get("WARDEN_GIT_BASE_URL", "https://github.com").rstrip("/")
     value = repo_url.strip()
     if value.startswith("git@github.com:"):
-        return f"https://github.com/{value.split(':', 1)[1]}"
+        return f"{base_url}/{value.split(':', 1)[1]}"
     if value.startswith("http://") or value.startswith("https://"):
         base = value.removesuffix(".git")
     else:
-        base = f"https://github.com/{value.removesuffix('.git')}"
+        base = f"{base_url}/{value.removesuffix('.git')}"
     return base
 
 
@@ -383,6 +440,20 @@ def start_session(
         return runner.ensure_session(request)
     except (RuntimeError, OSError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/sessions/{server_id}", response_model=SessionResponse)
+def get_session(
+    server_id: str,
+    authorization: str | None = Header(default=None),
+) -> SessionResponse:
+    expected = os.environ.get("WARDEN_RUNNER_TOKEN")
+    if expected and authorization != "Bearer " + expected:
+        raise HTTPException(status_code=401, detail="invalid runner credentials")
+    session = runner.lookup(server_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="no live session for this server")
+    return session
 
 
 @app.delete("/sessions/{server_id}", status_code=204)

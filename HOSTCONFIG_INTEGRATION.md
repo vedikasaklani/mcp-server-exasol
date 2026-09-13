@@ -374,6 +374,8 @@ the API):
 | `WARDEN_RUNNER_TOKEN` | must match the API side if set |
 | `WARDEN_RUNSC_BIN` | path to `runsc`, read by `warden-serve` itself |
 | `WARDEN_REQUEST_TIMEOUT` | optional; overrides `warden-serve -request-timeout` (default 30s) for a legitimately slow but native-filesystem workload — see §0 |
+| `WARDEN_GIT_BASE_URL` | optional; host that a stored `owner/repo` is cloned from (default `https://github.com`). Set it for GitHub Enterprise, an internal mirror, or a local git fixture. Full URLs stored on a server are unaffected. |
+| `WARDEN_SERVE_READY_TIMEOUT` | optional; seconds to wait for `warden-serve` to begin accepting connections before a session start is reported as failed (default 120) |
 
 Optional, static analysis:
 

@@ -32,7 +32,9 @@ from server_management.services.runtime_telemetry import (
     ensure_analyzer_key,
     ensure_tool_key,
     resolve_server,
+    write_tools,
 )
+from server_management.services.tool_catalog import upsert_discovered_tools
 
 SCHEMA = "MCP_ANALYTICS"
 
@@ -126,6 +128,24 @@ def sync_rule_phase_findings(pg_session: Session, scan_run_id: str) -> None:
         # never sets TOOL_KEY - that stays NULL for rule-phase findings.
         for t in tools:
             ensure_tool_key(exa, canonical_id, t.name, scan_run_id)
+
+        # ensure_tool_key only establishes the key; it deliberately writes no
+        # descriptive columns. Without this the scan-declared catalog reaches
+        # the dashboard as a list of bare names with empty descriptions, and
+        # never reaches the PostgreSQL-backed /tools catalog at all - so a
+        # server that has passed static analysis but has never run live looks
+        # like it has no usable tools.
+        declared = [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "parameter_schema": t.parameter_schema or {},
+            }
+            for t in tools
+        ]
+        if declared:
+            write_tools(canonical_id, declared, source="declared")
+            upsert_discovered_tools(canonical_id, declared, source="declared")
 
         rows = []
         for f in findings:

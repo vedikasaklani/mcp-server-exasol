@@ -26,7 +26,6 @@ export default function SecurityPage() {
 
   useEffect(() => {
     if (!selected) return;
-    setManifest(null);
     api
       .getManifest(selected)
       .then((m) => {
@@ -72,7 +71,10 @@ export default function SecurityPage() {
           <div className="mt-5">
             <select
               value={selected}
-              onChange={(e) => setSelected(e.target.value)}
+              onChange={(e) => {
+                setManifest(null);
+                setSelected(e.target.value);
+              }}
               className="w-full max-w-sm rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-text focus:border-accent focus:outline-none"
             >
               {servers?.map((s) => (

@@ -44,9 +44,14 @@ export default function AuditPage() {
   }, [servers, selectedServer]);
 
   useEffect(() => {
-    load();
+    // Keep the initial refresh asynchronous for the same reason as the
+    // interval refresh: state changes belong to the fetch completion.
+    const initial = window.setTimeout(() => void load(), 0);
     const id = setInterval(load, 15000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(initial);
+      clearInterval(id);
+    };
   }, [load]);
 
   const filtered = useMemo(() => {

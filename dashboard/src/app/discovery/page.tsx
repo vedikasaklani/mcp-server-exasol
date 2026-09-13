@@ -39,7 +39,10 @@ export default function DiscoveryPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    // Fetch after mount so this effect subscribes to an external operation
+    // instead of synchronously scheduling a state update during commit.
+    const id = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(id);
   }, [load]);
 
   const filtered = rows?.filter((r) => {
