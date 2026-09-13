@@ -1,37 +1,48 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, ServerSummary, Tool } from "@/lib/api";
-import { Badge, Card, EmptyState, ErrorState, Spinner } from "@/components/ui";
+import { api, ApiError, type ServerSummary, type Tool } from "@/lib/api";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LiveBadge,
+  Mono,
+  PageHeader,
+  ScoreRing,
+  Spinner,
+  num,
+} from "@/components/ui";
 import { Modal } from "@/components/Modal";
 
-interface ServerCardData {
+interface Row {
   server: ServerSummary;
   tools: Tool[];
   live: boolean;
-  toolsError?: string;
 }
 
 export default function DiscoveryPage() {
-  const [rows, setRows] = useState<ServerCardData[] | null>(null);
+  const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showRegister, setShowRegister] = useState(false);
-  const [callTarget, setCallTarget] = useState<{ serverId: string; serverLabel: string; tool: Tool } | null>(null);
+  const [callTarget, setCallTarget] = useState<{ serverId: string; label: string; tool: Tool } | null>(null);
 
   const load = useCallback(async () => {
     try {
       const servers = await api.listServers();
-      const rows = await Promise.all(
-        servers.map(async (server): Promise<ServerCardData> => {
-          const [tools, live] = await Promise.all([
-            api.getTools(server.server_id).catch(() => [] as Tool[]),
-            api.getLiveStatus(server.server_id).then((s) => s.running).catch(() => false),
-          ]);
-          return { server, tools, live };
-        })
+      setRows(
+        await Promise.all(
+          servers.map(async (server): Promise<Row> => {
+            const [tools, live] = await Promise.all([
+              api.getTools(server.server_id).catch(() => [] as Tool[]),
+              api.getLiveStatus(server.server_id).then((s) => s.running).catch(() => false),
+            ]);
+            return { server, tools, live };
+          })
+        )
       );
-      setRows(rows);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not reach the backend API.");
@@ -39,8 +50,6 @@ export default function DiscoveryPage() {
   }, []);
 
   useEffect(() => {
-    // Fetch after mount so this effect subscribes to an external operation
-    // instead of synchronously scheduling a state update during commit.
     const id = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(id);
   }, [load]);
@@ -55,50 +64,101 @@ export default function DiscoveryPage() {
   });
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-text">Discovery Hub</h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Every server registered with the trust &amp; reputation platform, and what it exposes.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowRegister(true)}
-          className="shrink-0 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft"
-        >
-          + Connect a server
-        </button>
-      </div>
+    <>
+      <PageHeader
+        title="Discovery"
+        subtitle="Every MCP server registered with the gateway, and the tools it exposes."
+        right={
+          <div className="flex items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search servers or tools…"
+              className="w-60 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[13px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+            />
+            <Button variant="primary" onClick={() => setShowRegister(true)}>
+              Connect a server
+            </Button>
+          </div>
+        }
+      />
 
-      <div className="mt-5">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by server or tool name…"
-          className="w-full max-w-sm rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
-        />
-      </div>
-
-      {error && !rows ? (
-        <Card className="mt-6">
-          <ErrorState message={error} />
-        </Card>
-      ) : !rows ? (
-        <div className="mt-16 flex justify-center">
-          <Spinner />
-        </div>
-      ) : filtered && filtered.length === 0 ? (
-        <Card className="mt-6">
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && !filtered && <Spinner label="Loading servers…" />}
+      {!error && filtered?.length === 0 && (
+        <Card>
           <EmptyState
-            title={rows.length === 0 ? "No servers registered yet" : "No matches"}
-            hint={rows.length === 0 ? "Connect a GitHub-hosted MCP server to get started." : "Try a different search term."}
+            title={query ? "Nothing matches that search" : "No servers registered yet"}
+            hint={query ? undefined : "Connect one from GitHub or npm to get started."}
           />
         </Card>
-      ) : (
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered!.map((row) => (
-            <ServerCard key={row.server.server_id} row={row} onCallTool={(tool) => setCallTarget({ serverId: row.server.server_id, serverLabel: row.server.source, tool })} />
+      )}
+
+      {!error && filtered && filtered.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {filtered.map(({ server, tools, live }) => (
+            <Card key={server.server_id} padded={false} className="flex flex-col">
+              <div className="flex items-start gap-3.5 border-b border-border px-5 py-4">
+                <ScoreRing score={server.overall_score} size={48} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-[13.5px] font-semibold text-text">{server.source}</h3>
+                    <LiveBadge live={live} />
+                  </div>
+                  <Mono className="mt-0.5 block text-text-faint">{server.server_id.slice(0, 18)}…</Mono>
+                  <div className="mt-1.5 flex gap-3 text-[11.5px] text-text-faint">
+                    <span className="tabular">
+                      security {server.security_score === null ? "—" : server.security_score}
+                    </span>
+                    <span className="tabular">{num(tools.length)} tools</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 px-5 py-3">
+                <div className="eyebrow mb-2">Exposed tools</div>
+                {tools.length === 0 ? (
+                  <p className="text-[12px] text-text-faint">
+                    Nothing discovered yet — scan it or start a session to populate the catalogue.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {tools.map((t) => (
+                      <li key={t.name} className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <Mono className="text-text">{t.name}</Mono>
+                          {t.description && (
+                            <p className="truncate text-[11.5px] text-text-faint">{t.description}</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                              t.source === "observed"
+                                ? "bg-accent-bg text-accent"
+                                : "bg-surface-2 text-text-faint"
+                            }`}
+                            title={
+                              t.source === "observed"
+                                ? "Advertised by the running server"
+                                : "Extracted from source by static analysis"
+                            }
+                          >
+                            {t.source || "—"}
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => setCallTarget({ serverId: server.server_id, label: server.source, tool: t })}
+                          >
+                            Run
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Card>
           ))}
         </div>
       )}
@@ -106,206 +166,160 @@ export default function DiscoveryPage() {
       {showRegister && (
         <RegisterModal
           onClose={() => setShowRegister(false)}
-          onRegistered={() => {
+          onDone={() => {
             setShowRegister(false);
-            load();
+            void load();
           }}
         />
       )}
-
-      {callTarget && (
-        <CallToolModal
-          serverId={callTarget.serverId}
-          serverLabel={callTarget.serverLabel}
-          tool={callTarget.tool}
-          onClose={() => setCallTarget(null)}
-        />
-      )}
-    </div>
+      {callTarget && <CallModal {...callTarget} onClose={() => setCallTarget(null)} />}
+    </>
   );
 }
 
-function ServerCard({ row, onCallTool }: { row: ServerCardData; onCallTool: (tool: Tool) => void }) {
-  const { server, tools, live } = row;
-  return (
-    <Card className="flex flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-text" title={server.source}>
-            {server.source}
-          </p>
-          <p className="mt-0.5 font-mono text-[11px] text-text-faint">{server.server_id.slice(0, 13)}…</p>
-        </div>
-        <Badge tone={live ? "success" : "neutral"}>
-          <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-400" : "bg-text-faint"}`} />
-          {live ? "Live" : "Offline"}
-        </Badge>
-      </div>
+const EXAMPLES = [
+  { value: "npm:@modelcontextprotocol/server-memory", note: "official knowledge-graph server" },
+  { value: "npm:@modelcontextprotocol/server-sequential-thinking", note: "official reasoning server" },
+];
 
-      <div className="flex gap-4 border-b border-border px-5 py-3 text-xs">
-        <Metric label="Reputation" value={server.overall_score !== null ? server.overall_score.toFixed(0) : "—"} />
-        <Metric label="Security" value={server.security_score !== null ? server.security_score.toFixed(0) : "—"} />
-        <Metric label="Tools" value={String(tools.length)} />
-      </div>
+function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-      <div className="flex-1 px-5 py-3">
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-text-faint">Exposed tools</p>
-        {tools.length === 0 ? (
-          <p className="text-xs text-text-faint">No tools discovered yet.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {tools.slice(0, 5).map((t) => (
-              <li key={t.name} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-surface-hover">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-text">{t.name}</p>
-                  {t.description && <p className="truncate text-[11px] text-text-faint">{t.description}</p>}
-                </div>
-                <button
-                  onClick={() => onCallTool(t)}
-                  disabled={!live}
-                  className="shrink-0 rounded-md border border-border-strong px-2 py-1 text-[11px] font-medium text-text-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
-                  title={live ? "Call this tool" : "Server is not live"}
-                >
-                  Try it
-                </button>
-              </li>
-            ))}
-            {tools.length > 5 && (
-              <li className="px-2 text-[11px] text-text-faint">+{tools.length - 5} more</li>
-            )}
-          </ul>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-text-faint">{label}</p>
-      <p className="font-semibold text-text">{value}</p>
-    </div>
-  );
-}
-
-function RegisterModal({ onClose, onRegistered }: { onClose: () => void; onRegistered: () => void }) {
-  const [repoUrl, setRepoUrl] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submit() {
-    if (!repoUrl.trim()) return;
-    setSubmitting(true);
-    setErr(null);
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
     try {
-      await api.registerServer({ repo_url: repoUrl.trim(), installation_id: 1, allowed_destinations: [] });
-      onRegistered();
+      await api.registerServer({ repo_url: value.trim(), installation_id: 1 });
+      onDone();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Registration failed.");
+      setError(e instanceof ApiError ? e.message : "Registration failed");
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
-  }
+  };
 
   return (
-    <Modal title="Connect a server" onClose={onClose}>
-      <p className="text-xs text-text-muted">
-        GitHub repo, either <code className="rounded bg-surface px-1 py-0.5">owner/repo</code> or a full URL.
+    <Modal title="Connect an MCP server" onClose={onClose}>
+      <p className="text-[12.5px] leading-relaxed text-text-muted">
+        Give an npm package or a GitHub repository. Registration establishes identity only —
+        nothing runs until it has passed a scan.
       </p>
+
       <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && value.trim() && !busy && submit()}
+        placeholder="npm:@modelcontextprotocol/server-memory"
         autoFocus
-        value={repoUrl}
-        onChange={(e) => setRepoUrl(e.target.value)}
-        placeholder="owner/repo"
-        className="mt-3 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+        className="mt-4 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12.5px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
       />
-      {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <button onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm text-text-muted hover:bg-surface-hover">
-          Cancel
-        </button>
-        <button
-          onClick={submit}
-          disabled={submitting || !repoUrl.trim()}
-          className="rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50"
-        >
-          {submitting ? "Registering…" : "Register"}
-        </button>
+
+      <div className="mt-3">
+        <div className="eyebrow mb-1.5">Known to work</div>
+        <div className="space-y-1">
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex.value}
+              onClick={() => setValue(ex.value)}
+              className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-2.5 py-1.5 text-left transition-colors hover:bg-surface-hover"
+            >
+              <Mono className="truncate text-text-muted">{ex.value}</Mono>
+              <span className="shrink-0 text-[11px] text-text-faint">{ex.note}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="mt-3 text-[11px] text-text-faint">
-        Registration starts static analysis in the background. To actually run it live, set a launch command from
-        Security Controls, or wait for an approved Warden profile.
-      </p>
+
+      {error && <p className="mt-3 text-[12.5px] text-danger">{error}</p>}
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit} disabled={busy || !value.trim()}>
+          {busy ? "Registering…" : "Register"}
+        </Button>
+      </div>
     </Modal>
   );
 }
 
-function CallToolModal({
+function CallModal({
   serverId,
-  serverLabel,
+  label,
   tool,
   onClose,
 }: {
   serverId: string;
-  serverLabel: string;
+  label: string;
   tool: Tool;
   onClose: () => void;
 }) {
-  const [argsText, setArgsText] = useState("{}");
+  const [args, setArgs] = useState("{}");
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [calling, setCalling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function call() {
-    setCalling(true);
-    setErrMsg(null);
+  const run = async () => {
+    setBusy(true);
+    setError(null);
     setResult(null);
     try {
-      const args = JSON.parse(argsText || "{}");
-      const res = await api.callTool(serverId, tool.name, args);
+      const parsed = JSON.parse(args || "{}");
+      const res = await api.callTool(serverId, tool.name, parsed);
       setResult(JSON.stringify(res, null, 2));
     } catch (e) {
-      setErrMsg(e instanceof ApiError ? e.message : e instanceof SyntaxError ? "Arguments must be valid JSON." : "Call failed.");
+      setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Call failed");
     } finally {
-      setCalling(false);
+      setBusy(false);
     }
-  }
+  };
 
   return (
-    <Modal title={`Call ${tool.name}`} onClose={onClose} wide>
-      <p className="text-xs text-text-muted">
-        {serverLabel} · {tool.description || "no description"}
+    <Modal title={`Run ${tool.name}`} onClose={onClose} wide>
+      <p className="text-[12.5px] text-text-muted">
+        {label}
+        {tool.description ? ` · ${tool.description}` : ""}
       </p>
-      <p className="mt-3 text-xs font-medium uppercase tracking-wide text-text-faint">Arguments (JSON)</p>
+
+      {Object.keys(tool.parameter_schema ?? {}).length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[12px] text-text-faint hover:text-text-muted">
+            Parameter schema
+          </summary>
+          <pre className="mt-2 overflow-x-auto rounded-lg border border-border bg-surface p-3 font-mono text-[11px] text-text-muted">
+            {JSON.stringify(tool.parameter_schema, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      <div className="eyebrow mb-1.5 mt-4">Arguments (JSON)</div>
       <textarea
-        value={argsText}
-        onChange={(e) => setArgsText(e.target.value)}
-        rows={4}
-        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-xs text-text focus:border-accent focus:outline-none"
+        value={args}
+        onChange={(e) => setArgs(e.target.value)}
+        rows={5}
+        className="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12px] text-text focus:border-accent focus:outline-none"
       />
-      <div className="mt-3 flex justify-end">
-        <button
-          onClick={call}
-          disabled={calling}
-          className="rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50"
-        >
-          {calling ? "Calling…" : "Call tool"}
-        </button>
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-[11.5px] text-text-faint">
+          Executes inside gVisor. The call is audited in real time — check the Audit Trail after.
+        </p>
+        <Button variant="primary" onClick={run} disabled={busy}>
+          {busy ? "Running…" : "Run tool"}
+        </Button>
       </div>
-      {errMsg && (
-        <div className="mt-3 rounded-lg border border-red-700/40 bg-danger-bg px-3.5 py-2.5 text-xs text-red-300">
-          {errMsg}
-        </div>
+
+      {error && (
+        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-[11.5px] text-danger">
+          {error}
+        </pre>
       )}
       {result && (
-        <pre className="mt-3 max-h-56 overflow-auto rounded-lg border border-border bg-bg px-3.5 py-2.5 font-mono text-xs text-text-muted">
+        <pre className="mt-3 max-h-72 overflow-auto rounded-lg border border-border bg-surface p-3 font-mono text-[11.5px] text-text-muted">
           {result}
         </pre>
       )}
-      <p className="mt-3 text-[11px] text-text-faint">
-        This call is recorded to the audit trail in real time — check Audit &amp; Activity right after.
-      </p>
     </Modal>
   );
 }

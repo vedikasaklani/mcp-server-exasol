@@ -29,7 +29,7 @@ function DiscoveryPage() {
         "DiscoveryPage.useCallback[load]": async ()=>{
             try {
                 const servers = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["api"].listServers();
-                const rows = await Promise.all(servers.map({
+                setRows(await Promise.all(servers.map({
                     "DiscoveryPage.useCallback[load]": async (server)=>{
                         const [tools, live] = await Promise.all([
                             __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["api"].getTools(server.server_id).catch({
@@ -47,8 +47,7 @@ function DiscoveryPage() {
                             live
                         };
                     }
-                }["DiscoveryPage.useCallback[load]"]));
-                setRows(rows);
+                }["DiscoveryPage.useCallback[load]"])));
                 setError(null);
             } catch (e) {
                 setError(e instanceof __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ApiError"] ? e.message : "Could not reach the backend API.");
@@ -57,8 +56,6 @@ function DiscoveryPage() {
     }["DiscoveryPage.useCallback[load]"], []);
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useEffect"])({
         "DiscoveryPage.useEffect": ()=>{
-            // Fetch after mount so this effect subscribes to an external operation
-            // instead of synchronously scheduling a state update during commit.
             const id = window.setTimeout({
                 "DiscoveryPage.useEffect.id": ()=>void load()
             }["DiscoveryPage.useEffect.id"], 0);
@@ -74,592 +71,590 @@ function DiscoveryPage() {
         const q = query.toLowerCase();
         return r.server.source.toLowerCase().includes(q) || r.tools.some((t)=>t.name.toLowerCase().includes(q));
     });
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Fragment"], {
         children: [
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "flex items-center justify-between gap-4",
-                children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["PageHeader"], {
+                title: "Discovery",
+                subtitle: "Every MCP server registered with the gateway, and the tools it exposes.",
+                right: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                    className: "flex items-center gap-2",
+                    children: [
+                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
+                            value: query,
+                            onChange: (e)=>setQuery(e.target.value),
+                            placeholder: "Search servers or tools…",
+                            className: "w-60 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[13px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+                        }, void 0, false, {
+                            fileName: "[project]/src/app/discovery/page.tsx",
+                            lineNumber: 73,
+                            columnNumber: 13
+                        }, this),
+                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
+                            variant: "primary",
+                            onClick: ()=>setShowRegister(true),
+                            children: "Connect a server"
+                        }, void 0, false, {
+                            fileName: "[project]/src/app/discovery/page.tsx",
+                            lineNumber: 79,
+                            columnNumber: 13
+                        }, this)
+                    ]
+                }, void 0, true, {
+                    fileName: "[project]/src/app/discovery/page.tsx",
+                    lineNumber: 72,
+                    columnNumber: 11
+                }, this)
+            }, void 0, false, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 68,
+                columnNumber: 7
+            }, this),
+            error && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ErrorState"], {
+                message: error,
+                onRetry: load
+            }, void 0, false, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 86,
+                columnNumber: 17
+            }, this),
+            !error && !filtered && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Spinner"], {
+                label: "Loading servers…"
+            }, void 0, false, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 87,
+                columnNumber: 31
+            }, this),
+            !error && filtered?.length === 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Card"], {
+                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["EmptyState"], {
+                    title: query ? "Nothing matches that search" : "No servers registered yet",
+                    hint: query ? undefined : "Connect one from GitHub or npm to get started."
+                }, void 0, false, {
+                    fileName: "[project]/src/app/discovery/page.tsx",
+                    lineNumber: 90,
+                    columnNumber: 11
+                }, this)
+            }, void 0, false, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 89,
+                columnNumber: 9
+            }, this),
+            !error && filtered && filtered.length > 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "grid gap-4 lg:grid-cols-2 2xl:grid-cols-3",
+                children: filtered.map(({ server, tools, live })=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Card"], {
+                        padded: false,
+                        className: "flex flex-col",
                         children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h1", {
-                                className: "text-xl font-semibold text-text",
-                                children: "Discovery Hub"
-                            }, void 0, false, {
+                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                className: "flex items-start gap-3.5 border-b border-border px-5 py-4",
+                                children: [
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ScoreRing"], {
+                                        score: server.overall_score,
+                                        size: 48
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 102,
+                                        columnNumber: 17
+                                    }, this),
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "min-w-0 flex-1",
+                                        children: [
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "flex items-center gap-2",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h3", {
+                                                        className: "truncate text-[13.5px] font-semibold text-text",
+                                                        children: server.source
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 105,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LiveBadge"], {
+                                                        live: live
+                                                    }, void 0, false, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 106,
+                                                        columnNumber: 21
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                lineNumber: 104,
+                                                columnNumber: 19
+                                            }, this),
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Mono"], {
+                                                className: "mt-0.5 block text-text-faint",
+                                                children: [
+                                                    server.server_id.slice(0, 18),
+                                                    "…"
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                lineNumber: 108,
+                                                columnNumber: 19
+                                            }, this),
+                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                className: "mt-1.5 flex gap-3 text-[11.5px] text-text-faint",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        className: "tabular",
+                                                        children: [
+                                                            "security ",
+                                                            server.security_score === null ? "—" : server.security_score
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 110,
+                                                        columnNumber: 21
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                        className: "tabular",
+                                                        children: [
+                                                            (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["num"])(tools.length),
+                                                            " tools"
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 113,
+                                                        columnNumber: 21
+                                                    }, this)
+                                                ]
+                                            }, void 0, true, {
+                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                lineNumber: 109,
+                                                columnNumber: 19
+                                            }, this)
+                                        ]
+                                    }, void 0, true, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 103,
+                                        columnNumber: 17
+                                    }, this)
+                                ]
+                            }, void 0, true, {
                                 fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 61,
-                                columnNumber: 11
+                                lineNumber: 101,
+                                columnNumber: 15
                             }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                                className: "mt-1 text-sm text-text-muted",
-                                children: "Every server registered with the trust & reputation platform, and what it exposes."
-                            }, void 0, false, {
+                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                className: "flex-1 px-5 py-3",
+                                children: [
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "eyebrow mb-2",
+                                        children: "Exposed tools"
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 119,
+                                        columnNumber: 17
+                                    }, this),
+                                    tools.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
+                                        className: "text-[12px] text-text-faint",
+                                        children: "Nothing discovered yet — scan it or start a session to populate the catalogue."
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 121,
+                                        columnNumber: 19
+                                    }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("ul", {
+                                        className: "space-y-1.5",
+                                        children: tools.map((t)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("li", {
+                                                className: "flex items-start justify-between gap-3",
+                                                children: [
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "min-w-0",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Mono"], {
+                                                                className: "text-text",
+                                                                children: t.name
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                                lineNumber: 129,
+                                                                columnNumber: 27
+                                                            }, this),
+                                                            t.description && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
+                                                                className: "truncate text-[11.5px] text-text-faint",
+                                                                children: t.description
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                                lineNumber: 131,
+                                                                columnNumber: 29
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 128,
+                                                        columnNumber: 25
+                                                    }, this),
+                                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                                        className: "flex shrink-0 items-center gap-2",
+                                                        children: [
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                                                className: `rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${t.source === "observed" ? "bg-accent-bg text-accent" : "bg-surface-2 text-text-faint"}`,
+                                                                title: t.source === "observed" ? "Advertised by the running server" : "Extracted from source by static analysis",
+                                                                children: t.source || "—"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                                lineNumber: 135,
+                                                                columnNumber: 27
+                                                            }, this),
+                                                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
+                                                                size: "sm",
+                                                                onClick: ()=>setCallTarget({
+                                                                        serverId: server.server_id,
+                                                                        label: server.source,
+                                                                        tool: t
+                                                                    }),
+                                                                children: "Run"
+                                                            }, void 0, false, {
+                                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                                lineNumber: 149,
+                                                                columnNumber: 27
+                                                            }, this)
+                                                        ]
+                                                    }, void 0, true, {
+                                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                                        lineNumber: 134,
+                                                        columnNumber: 25
+                                                    }, this)
+                                                ]
+                                            }, t.name, true, {
+                                                fileName: "[project]/src/app/discovery/page.tsx",
+                                                lineNumber: 127,
+                                                columnNumber: 23
+                                            }, this))
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 125,
+                                        columnNumber: 19
+                                    }, this)
+                                ]
+                            }, void 0, true, {
                                 fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 62,
-                                columnNumber: 11
+                                lineNumber: 118,
+                                columnNumber: 15
                             }, this)
                         ]
-                    }, void 0, true, {
+                    }, server.server_id, true, {
                         fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 60,
-                        columnNumber: 9
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                        onClick: ()=>setShowRegister(true),
-                        className: "shrink-0 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft",
-                        children: "+ Connect a server"
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 66,
-                        columnNumber: 9
-                    }, this)
-                ]
-            }, void 0, true, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 59,
-                columnNumber: 7
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-5",
-                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
-                    value: query,
-                    onChange: (e)=>setQuery(e.target.value),
-                    placeholder: "Search by server or tool name…",
-                    className: "w-full max-w-sm rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
-                }, void 0, false, {
-                    fileName: "[project]/src/app/discovery/page.tsx",
-                    lineNumber: 75,
-                    columnNumber: 9
-                }, this)
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 74,
-                columnNumber: 7
-            }, this),
-            error && !rows ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Card"], {
-                className: "mt-6",
-                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ErrorState"], {
-                    message: error
-                }, void 0, false, {
-                    fileName: "[project]/src/app/discovery/page.tsx",
-                    lineNumber: 85,
-                    columnNumber: 11
-                }, this)
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 84,
-                columnNumber: 9
-            }, this) : !rows ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-16 flex justify-center",
-                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Spinner"], {}, void 0, false, {
-                    fileName: "[project]/src/app/discovery/page.tsx",
-                    lineNumber: 89,
-                    columnNumber: 11
-                }, this)
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 88,
-                columnNumber: 9
-            }, this) : filtered && filtered.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Card"], {
-                className: "mt-6",
-                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["EmptyState"], {
-                    title: rows.length === 0 ? "No servers registered yet" : "No matches",
-                    hint: rows.length === 0 ? "Connect a GitHub-hosted MCP server to get started." : "Try a different search term."
-                }, void 0, false, {
-                    fileName: "[project]/src/app/discovery/page.tsx",
-                    lineNumber: 93,
-                    columnNumber: 11
-                }, this)
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 92,
-                columnNumber: 9
-            }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
-                children: filtered.map((row)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(ServerCard, {
-                        row: row,
-                        onCallTool: (tool)=>setCallTarget({
-                                serverId: row.server.server_id,
-                                serverLabel: row.server.source,
-                                tool
-                            })
-                    }, row.server.server_id, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 101,
+                        lineNumber: 100,
                         columnNumber: 13
                     }, this))
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 99,
+                lineNumber: 98,
                 columnNumber: 9
             }, this),
             showRegister && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(RegisterModal, {
                 onClose: ()=>setShowRegister(false),
-                onRegistered: ()=>{
+                onDone: ()=>{
                     setShowRegister(false);
-                    load();
+                    void load();
                 }
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 107,
+                lineNumber: 167,
                 columnNumber: 9
             }, this),
-            callTarget && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(CallToolModal, {
-                serverId: callTarget.serverId,
-                serverLabel: callTarget.serverLabel,
-                tool: callTarget.tool,
+            callTarget && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(CallModal, {
+                ...callTarget,
                 onClose: ()=>setCallTarget(null)
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 117,
-                columnNumber: 9
+                lineNumber: 175,
+                columnNumber: 22
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/discovery/page.tsx",
-        lineNumber: 58,
+        lineNumber: 67,
         columnNumber: 5
     }, this);
 }
 _s(DiscoveryPage, "5LAprIoK8OrqBWS9q7YVQcV4obE=");
 _c = DiscoveryPage;
-function ServerCard({ row, onCallTool }) {
-    const { server, tools, live } = row;
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Card"], {
-        className: "flex flex-col",
-        children: [
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "flex items-start justify-between gap-3 border-b border-border px-5 py-4",
-                children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                        className: "min-w-0",
-                        children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                                className: "truncate text-sm font-semibold text-text",
-                                title: server.source,
-                                children: server.source
-                            }, void 0, false, {
-                                fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 134,
-                                columnNumber: 11
-                            }, this),
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                                className: "mt-0.5 font-mono text-[11px] text-text-faint",
-                                children: [
-                                    server.server_id.slice(0, 13),
-                                    "…"
-                                ]
-                            }, void 0, true, {
-                                fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 137,
-                                columnNumber: 11
-                            }, this)
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 133,
-                        columnNumber: 9
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Badge"], {
-                        tone: live ? "success" : "neutral",
-                        children: [
-                            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-                                className: `h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-400" : "bg-text-faint"}`
-                            }, void 0, false, {
-                                fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 140,
-                                columnNumber: 11
-                            }, this),
-                            live ? "Live" : "Offline"
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 139,
-                        columnNumber: 9
-                    }, this)
-                ]
-            }, void 0, true, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 132,
-                columnNumber: 7
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "flex gap-4 border-b border-border px-5 py-3 text-xs",
-                children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Metric, {
-                        label: "Reputation",
-                        value: server.overall_score !== null ? server.overall_score.toFixed(0) : "—"
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 146,
-                        columnNumber: 9
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Metric, {
-                        label: "Security",
-                        value: server.security_score !== null ? server.security_score.toFixed(0) : "—"
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 147,
-                        columnNumber: 9
-                    }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Metric, {
-                        label: "Tools",
-                        value: String(tools.length)
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 148,
-                        columnNumber: 9
-                    }, this)
-                ]
-            }, void 0, true, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 145,
-                columnNumber: 7
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "flex-1 px-5 py-3",
-                children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                        className: "mb-2 text-xs font-medium uppercase tracking-wide text-text-faint",
-                        children: "Exposed tools"
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 152,
-                        columnNumber: 9
-                    }, this),
-                    tools.length === 0 ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                        className: "text-xs text-text-faint",
-                        children: "No tools discovered yet."
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 154,
-                        columnNumber: 11
-                    }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("ul", {
-                        className: "space-y-1.5",
-                        children: [
-                            tools.slice(0, 5).map((t)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("li", {
-                                    className: "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-surface-hover",
-                                    children: [
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                            className: "min-w-0",
-                                            children: [
-                                                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                                                    className: "truncate text-xs font-medium text-text",
-                                                    children: t.name
-                                                }, void 0, false, {
-                                                    fileName: "[project]/src/app/discovery/page.tsx",
-                                                    lineNumber: 160,
-                                                    columnNumber: 19
-                                                }, this),
-                                                t.description && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                                                    className: "truncate text-[11px] text-text-faint",
-                                                    children: t.description
-                                                }, void 0, false, {
-                                                    fileName: "[project]/src/app/discovery/page.tsx",
-                                                    lineNumber: 161,
-                                                    columnNumber: 37
-                                                }, this)
-                                            ]
-                                        }, void 0, true, {
-                                            fileName: "[project]/src/app/discovery/page.tsx",
-                                            lineNumber: 159,
-                                            columnNumber: 17
-                                        }, this),
-                                        /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                                            onClick: ()=>onCallTool(t),
-                                            disabled: !live,
-                                            className: "shrink-0 rounded-md border border-border-strong px-2 py-1 text-[11px] font-medium text-text-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40",
-                                            title: live ? "Call this tool" : "Server is not live",
-                                            children: "Try it"
-                                        }, void 0, false, {
-                                            fileName: "[project]/src/app/discovery/page.tsx",
-                                            lineNumber: 163,
-                                            columnNumber: 17
-                                        }, this)
-                                    ]
-                                }, t.name, true, {
-                                    fileName: "[project]/src/app/discovery/page.tsx",
-                                    lineNumber: 158,
-                                    columnNumber: 15
-                                }, this)),
-                            tools.length > 5 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("li", {
-                                className: "px-2 text-[11px] text-text-faint",
-                                children: [
-                                    "+",
-                                    tools.length - 5,
-                                    " more"
-                                ]
-                            }, void 0, true, {
-                                fileName: "[project]/src/app/discovery/page.tsx",
-                                lineNumber: 174,
-                                columnNumber: 15
-                            }, this)
-                        ]
-                    }, void 0, true, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 156,
-                        columnNumber: 11
-                    }, this)
-                ]
-            }, void 0, true, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 151,
-                columnNumber: 7
-            }, this)
-        ]
-    }, void 0, true, {
-        fileName: "[project]/src/app/discovery/page.tsx",
-        lineNumber: 131,
-        columnNumber: 5
-    }, this);
-}
-_c1 = ServerCard;
-function Metric({ label, value }) {
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        children: [
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "text-text-faint",
-                children: label
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 186,
-                columnNumber: 7
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "font-semibold text-text",
-                children: value
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 187,
-                columnNumber: 7
-            }, this)
-        ]
-    }, void 0, true, {
-        fileName: "[project]/src/app/discovery/page.tsx",
-        lineNumber: 185,
-        columnNumber: 5
-    }, this);
-}
-_c2 = Metric;
-function RegisterModal({ onClose, onRegistered }) {
+const EXAMPLES = [
+    {
+        value: "npm:@modelcontextprotocol/server-memory",
+        note: "official knowledge-graph server"
+    },
+    {
+        value: "npm:@modelcontextprotocol/server-sequential-thinking",
+        note: "official reasoning server"
+    }
+];
+function RegisterModal({ onClose, onDone }) {
     _s1();
-    const [repoUrl, setRepoUrl] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
-    const [submitting, setSubmitting] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
-    const [err, setErr] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
-    async function submit() {
-        if (!repoUrl.trim()) return;
-        setSubmitting(true);
-        setErr(null);
+    const [value, setValue] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("");
+    const [busy, setBusy] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [error, setError] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
+    const submit = async ()=>{
+        setBusy(true);
+        setError(null);
         try {
             await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["api"].registerServer({
-                repo_url: repoUrl.trim(),
-                installation_id: 1,
-                allowed_destinations: []
+                repo_url: value.trim(),
+                installation_id: 1
             });
-            onRegistered();
+            onDone();
         } catch (e) {
-            setErr(e instanceof __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ApiError"] ? e.message : "Registration failed.");
+            setError(e instanceof __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ApiError"] ? e.message : "Registration failed");
         } finally{
-            setSubmitting(false);
+            setBusy(false);
         }
-    }
+    };
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$Modal$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Modal"], {
-        title: "Connect a server",
+        title: "Connect an MCP server",
         onClose: onClose,
         children: [
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "text-xs text-text-muted",
-                children: [
-                    "GitHub repo, either ",
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("code", {
-                        className: "rounded bg-surface px-1 py-0.5",
-                        children: "owner/repo"
-                    }, void 0, false, {
-                        fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 214,
-                        columnNumber: 29
-                    }, this),
-                    " or a full URL."
-                ]
-            }, void 0, true, {
+                className: "text-[12.5px] leading-relaxed text-text-muted",
+                children: "Give an npm package or a GitHub repository. Registration establishes identity only — nothing runs until it has passed a scan."
+            }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 213,
+                lineNumber: 205,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
+                value: value,
+                onChange: (e)=>setValue(e.target.value),
+                onKeyDown: (e)=>e.key === "Enter" && value.trim() && !busy && submit(),
+                placeholder: "npm:@modelcontextprotocol/server-memory",
                 autoFocus: true,
-                value: repoUrl,
-                onChange: (e)=>setRepoUrl(e.target.value),
-                placeholder: "owner/repo",
-                className: "mt-3 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+                className: "mt-4 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12.5px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 216,
+                lineNumber: 210,
                 columnNumber: 7
             }, this),
-            err && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "mt-2 text-xs text-red-300",
-                children: err
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 223,
-                columnNumber: 15
-            }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-4 flex justify-end gap-2",
+                className: "mt-3",
                 children: [
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                        onClick: onClose,
-                        className: "rounded-lg px-3.5 py-2 text-sm text-text-muted hover:bg-surface-hover",
-                        children: "Cancel"
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                        className: "eyebrow mb-1.5",
+                        children: "Known to work"
                     }, void 0, false, {
                         fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 225,
+                        lineNumber: 220,
                         columnNumber: 9
                     }, this),
-                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                        onClick: submit,
-                        disabled: submitting || !repoUrl.trim(),
-                        className: "rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50",
-                        children: submitting ? "Registering…" : "Register"
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                        className: "space-y-1",
+                        children: EXAMPLES.map((ex)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+                                onClick: ()=>setValue(ex.value),
+                                className: "flex w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-2.5 py-1.5 text-left transition-colors hover:bg-surface-hover",
+                                children: [
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Mono"], {
+                                        className: "truncate text-text-muted",
+                                        children: ex.value
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 228,
+                                        columnNumber: 15
+                                    }, this),
+                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                                        className: "shrink-0 text-[11px] text-text-faint",
+                                        children: ex.note
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/app/discovery/page.tsx",
+                                        lineNumber: 229,
+                                        columnNumber: 15
+                                    }, this)
+                                ]
+                            }, ex.value, true, {
+                                fileName: "[project]/src/app/discovery/page.tsx",
+                                lineNumber: 223,
+                                columnNumber: 13
+                            }, this))
                     }, void 0, false, {
                         fileName: "[project]/src/app/discovery/page.tsx",
-                        lineNumber: 228,
+                        lineNumber: 221,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 224,
+                lineNumber: 219,
                 columnNumber: 7
             }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "mt-3 text-[11px] text-text-faint",
-                children: "Registration starts static analysis in the background. To actually run it live, set a launch command from Security Controls, or wait for an approved Warden profile."
+            error && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
+                className: "mt-3 text-[12.5px] text-danger",
+                children: error
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 236,
+                lineNumber: 235,
+                columnNumber: 17
+            }, this),
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "mt-5 flex justify-end gap-2",
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
+                        variant: "ghost",
+                        onClick: onClose,
+                        children: "Cancel"
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 238,
+                        columnNumber: 9
+                    }, this),
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
+                        variant: "primary",
+                        onClick: submit,
+                        disabled: busy || !value.trim(),
+                        children: busy ? "Registering…" : "Register"
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 239,
+                        columnNumber: 9
+                    }, this)
+                ]
+            }, void 0, true, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 237,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/discovery/page.tsx",
-        lineNumber: 212,
+        lineNumber: 204,
         columnNumber: 5
     }, this);
 }
-_s1(RegisterModal, "dy/BfEQ82+VFORnpOGN6H9r6sfI=");
-_c3 = RegisterModal;
-function CallToolModal({ serverId, serverLabel, tool, onClose }) {
+_s1(RegisterModal, "u4Nv9XV5pLJgVPAqKJyiM2ShrnU=");
+_c1 = RegisterModal;
+function CallModal({ serverId, label, tool, onClose }) {
     _s2();
-    const [argsText, setArgsText] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("{}");
+    const [args, setArgs] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])("{}");
+    const [busy, setBusy] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [result, setResult] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
-    const [errMsg, setErrMsg] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
-    const [calling, setCalling] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
-    async function call() {
-        setCalling(true);
-        setErrMsg(null);
+    const [error, setError] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
+    const run = async ()=>{
+        setBusy(true);
+        setError(null);
         setResult(null);
         try {
-            const args = JSON.parse(argsText || "{}");
-            const res = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["api"].callTool(serverId, tool.name, args);
+            const parsed = JSON.parse(args || "{}");
+            const res = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["api"].callTool(serverId, tool.name, parsed);
             setResult(JSON.stringify(res, null, 2));
         } catch (e) {
-            setErrMsg(e instanceof __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ApiError"] ? e.message : e instanceof SyntaxError ? "Arguments must be valid JSON." : "Call failed.");
+            setError(e instanceof __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$api$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ApiError"] ? e.message : e instanceof Error ? e.message : "Call failed");
         } finally{
-            setCalling(false);
+            setBusy(false);
         }
-    }
+    };
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$Modal$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Modal"], {
-        title: `Call ${tool.name}`,
+        title: `Run ${tool.name}`,
         onClose: onClose,
         wide: true,
         children: [
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "text-xs text-text-muted",
+                className: "text-[12.5px] text-text-muted",
                 children: [
-                    serverLabel,
-                    " · ",
-                    tool.description || "no description"
+                    label,
+                    tool.description ? ` · ${tool.description}` : ""
                 ]
             }, void 0, true, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 277,
-                columnNumber: 7
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "mt-3 text-xs font-medium uppercase tracking-wide text-text-faint",
-                children: "Arguments (JSON)"
-            }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
                 lineNumber: 280,
                 columnNumber: 7
             }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("textarea", {
-                value: argsText,
-                onChange: (e)=>setArgsText(e.target.value),
-                rows: 4,
-                className: "mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-xs text-text focus:border-accent focus:outline-none"
-            }, void 0, false, {
+            Object.keys(tool.parameter_schema ?? {}).length > 0 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("details", {
+                className: "mt-3",
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("summary", {
+                        className: "cursor-pointer text-[12px] text-text-faint hover:text-text-muted",
+                        children: "Parameter schema"
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 287,
+                        columnNumber: 11
+                    }, this),
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("pre", {
+                        className: "mt-2 overflow-x-auto rounded-lg border border-border bg-surface p-3 font-mono text-[11px] text-text-muted",
+                        children: JSON.stringify(tool.parameter_schema, null, 2)
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 290,
+                        columnNumber: 11
+                    }, this)
+                ]
+            }, void 0, true, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 281,
-                columnNumber: 7
+                lineNumber: 286,
+                columnNumber: 9
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-3 flex justify-end",
-                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
-                    onClick: call,
-                    disabled: calling,
-                    className: "rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50",
-                    children: calling ? "Calling…" : "Call tool"
-                }, void 0, false, {
-                    fileName: "[project]/src/app/discovery/page.tsx",
-                    lineNumber: 288,
-                    columnNumber: 9
-                }, this)
+                className: "eyebrow mb-1.5 mt-4",
+                children: "Arguments (JSON)"
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 287,
+                lineNumber: 296,
                 columnNumber: 7
             }, this),
-            errMsg && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: "mt-3 rounded-lg border border-red-700/40 bg-danger-bg px-3.5 py-2.5 text-xs text-red-300",
-                children: errMsg
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("textarea", {
+                value: args,
+                onChange: (e)=>setArgs(e.target.value),
+                rows: 5,
+                className: "w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12px] text-text focus:border-accent focus:outline-none"
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
                 lineNumber: 297,
+                columnNumber: 7
+            }, this),
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "mt-3 flex items-center justify-between gap-3",
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
+                        className: "text-[11.5px] text-text-faint",
+                        children: "Executes inside gVisor. The call is audited in real time — check the Audit Trail after."
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 305,
+                        columnNumber: 9
+                    }, this),
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
+                        variant: "primary",
+                        onClick: run,
+                        disabled: busy,
+                        children: busy ? "Running…" : "Run tool"
+                    }, void 0, false, {
+                        fileName: "[project]/src/app/discovery/page.tsx",
+                        lineNumber: 308,
+                        columnNumber: 9
+                    }, this)
+                ]
+            }, void 0, true, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 304,
+                columnNumber: 7
+            }, this),
+            error && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("pre", {
+                className: "mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border border-danger/30 bg-danger/5 p-3 font-mono text-[11.5px] text-danger",
+                children: error
+            }, void 0, false, {
+                fileName: "[project]/src/app/discovery/page.tsx",
+                lineNumber: 314,
                 columnNumber: 9
             }, this),
             result && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("pre", {
-                className: "mt-3 max-h-56 overflow-auto rounded-lg border border-border bg-bg px-3.5 py-2.5 font-mono text-xs text-text-muted",
+                className: "mt-3 max-h-72 overflow-auto rounded-lg border border-border bg-surface p-3 font-mono text-[11.5px] text-text-muted",
                 children: result
             }, void 0, false, {
                 fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 302,
+                lineNumber: 319,
                 columnNumber: 9
-            }, this),
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "mt-3 text-[11px] text-text-faint",
-                children: "This call is recorded to the audit trail in real time — check Audit & Activity right after."
-            }, void 0, false, {
-                fileName: "[project]/src/app/discovery/page.tsx",
-                lineNumber: 306,
-                columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/discovery/page.tsx",
-        lineNumber: 276,
+        lineNumber: 279,
         columnNumber: 5
     }, this);
 }
-_s2(CallToolModal, "hZ7bTnII7uDLB7P1zP6EZMXASic=");
-_c4 = CallToolModal;
-var _c, _c1, _c2, _c3, _c4;
+_s2(CallModal, "1IXMXxyT7hkomcbFkHnvQ7NxLu0=");
+_c2 = CallModal;
+var _c, _c1, _c2;
 __turbopack_context__.k.register(_c, "DiscoveryPage");
-__turbopack_context__.k.register(_c1, "ServerCard");
-__turbopack_context__.k.register(_c2, "Metric");
-__turbopack_context__.k.register(_c3, "RegisterModal");
-__turbopack_context__.k.register(_c4, "CallToolModal");
+__turbopack_context__.k.register(_c1, "RegisterModal");
+__turbopack_context__.k.register(_c2, "CallModal");
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
@@ -758,8 +753,8 @@ if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelper
 "use strict";
 
 __turbopack_context__.s([
-    "Badge",
-    ()=>Badge,
+    "Button",
+    ()=>Button,
     "Card",
     ()=>Card,
     "CardHeader",
@@ -770,274 +765,656 @@ __turbopack_context__.s([
     ()=>EmptyState,
     "ErrorState",
     ()=>ErrorState,
+    "KeyValue",
+    ()=>KeyValue,
+    "LiveBadge",
+    ()=>LiveBadge,
+    "Mono",
+    ()=>Mono,
+    "PageHeader",
+    ()=>PageHeader,
+    "ScoreRing",
+    ()=>ScoreRing,
     "SeverityBadge",
     ()=>SeverityBadge,
+    "SeverityBar",
+    ()=>SeverityBar,
+    "Sparkline",
+    ()=>Sparkline,
     "Spinner",
     ()=>Spinner,
     "StatCard",
-    ()=>StatCard
+    ()=>StatCard,
+    "bytes",
+    ()=>bytes,
+    "formatTime",
+    ()=>formatTime,
+    "num",
+    ()=>num,
+    "relativeTime",
+    ()=>relativeTime,
+    "severityStyle",
+    ()=>severityStyle
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/dist/compiled/react/jsx-dev-runtime.js [app-client] (ecmascript)");
+"use client";
 ;
-function Card({ children, className = "" }) {
+function Card({ children, className = "", padded = true }) {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        className: `rounded-xl border border-border bg-surface shadow-sm shadow-black/20 ${className}`,
+        className: `rounded-xl border border-border bg-surface ${padded ? "p-5" : ""} ${className}`,
         children: children
     }, void 0, false, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 5,
+        lineNumber: 17,
         columnNumber: 5
     }, this);
 }
 _c = Card;
-function CardHeader({ title, subtitle, action }) {
+function CardHeader({ title, subtitle, right }) {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
         className: "flex items-start justify-between gap-4 border-b border-border px-5 py-4",
         children: [
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "min-w-0",
                 children: [
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h2", {
-                        className: "text-sm font-semibold text-text",
+                        className: "text-[13.5px] font-semibold tracking-tight text-text",
                         children: title
                     }, void 0, false, {
                         fileName: "[project]/src/components/ui.tsx",
-                        lineNumber: 25,
+                        lineNumber: 37,
                         columnNumber: 9
                     }, this),
                     subtitle && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                        className: "mt-0.5 text-xs text-text-muted",
+                        className: "mt-0.5 text-xs text-text-faint",
                         children: subtitle
                     }, void 0, false, {
                         fileName: "[project]/src/components/ui.tsx",
-                        lineNumber: 26,
+                        lineNumber: 38,
                         columnNumber: 22
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 24,
+                lineNumber: 36,
                 columnNumber: 7
             }, this),
-            action
+            right && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "shrink-0",
+                children: right
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 40,
+                columnNumber: 17
+            }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 23,
+        lineNumber: 35,
         columnNumber: 5
     }, this);
 }
 _c1 = CardHeader;
-const badgeTones = {
-    neutral: "bg-white/5 text-text-muted border-border-strong",
-    accent: "bg-accent-bg text-blue-300 border-accent-soft/40",
-    success: "bg-success-bg text-emerald-300 border-emerald-700/40",
-    warning: "bg-warning-bg text-amber-300 border-amber-700/40",
-    danger: "bg-danger-bg text-red-300 border-red-700/40"
-};
-function Badge({ children, tone = "neutral", className = "" }) {
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
-        className: `inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium ${badgeTones[tone]} ${className}`,
+function PageHeader({ title, subtitle, right }) {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "mb-6 flex flex-wrap items-end justify-between gap-4",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h1", {
+                        className: "text-[22px] font-semibold tracking-tight text-text",
+                        children: title
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/ui.tsx",
+                        lineNumber: 57,
+                        columnNumber: 9
+                    }, this),
+                    subtitle && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
+                        className: "mt-1 text-[13px] text-text-muted",
+                        children: subtitle
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/ui.tsx",
+                        lineNumber: 58,
+                        columnNumber: 22
+                    }, this)
+                ]
+            }, void 0, true, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 56,
+                columnNumber: 7
+            }, this),
+            right
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 55,
+        columnNumber: 5
+    }, this);
+}
+_c2 = PageHeader;
+function Button({ children, onClick, variant = "default", disabled, size = "md", type = "button" }) {
+    const base = "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45";
+    const sizes = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-2 text-[13px]";
+    const variants = {
+        default: "border border-border-strong bg-surface-2 text-text hover:bg-surface-hover",
+        primary: "bg-accent text-[#04100e] hover:bg-accent-dim font-semibold",
+        danger: "border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20",
+        ghost: "text-text-muted hover:bg-surface-hover hover:text-text"
+    }[variant];
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
+        type: type,
+        onClick: onClick,
+        disabled: disabled,
+        className: `${base} ${sizes} ${variants}`,
         children: children
     }, void 0, false, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 51,
+        lineNumber: 90,
         columnNumber: 5
     }, this);
 }
-_c2 = Badge;
-function DecisionBadge({ decision }) {
-    const upper = decision.toUpperCase();
-    if (upper === "ALLOWED") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "success",
-        children: "● Allowed"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 62,
-        columnNumber: 35
-    }, this);
-    if (upper === "BLOCKED") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "danger",
-        children: "● Blocked"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 63,
-        columnNumber: 35
-    }, this);
-    if (upper === "FLAGGED") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "warning",
-        children: "● Warning"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 64,
-        columnNumber: 35
-    }, this);
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "neutral",
-        children: decision || "Unknown"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 65,
-        columnNumber: 10
-    }, this);
+_c3 = Button;
+/* ----------------------------------------------------------------- status */ const SEVERITY_STYLE = {
+    critical: {
+        fg: "text-sev-critical",
+        bg: "bg-sev-critical/12 border-sev-critical/30",
+        label: "Critical"
+    },
+    high: {
+        fg: "text-sev-high",
+        bg: "bg-sev-high/12 border-sev-high/30",
+        label: "High"
+    },
+    medium: {
+        fg: "text-sev-medium",
+        bg: "bg-sev-medium/12 border-sev-medium/30",
+        label: "Medium"
+    },
+    low: {
+        fg: "text-sev-low",
+        bg: "bg-sev-low/12 border-sev-low/30",
+        label: "Low"
+    },
+    none: {
+        fg: "text-text-faint",
+        bg: "bg-surface-2 border-border",
+        label: "Clean"
+    },
+    info: {
+        fg: "text-text-faint",
+        bg: "bg-surface-2 border-border",
+        label: "Info"
+    }
+};
+function severityStyle(severity) {
+    return SEVERITY_STYLE[severity?.toLowerCase()] ?? SEVERITY_STYLE.none;
 }
-_c3 = DecisionBadge;
-function SeverityBadge({ severity }) {
-    const upper = (severity || "").toUpperCase();
-    if (upper === "CRITICAL") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "danger",
-        children: "Critical"
+function SeverityBadge({ severity, label }) {
+    const s = severityStyle(severity);
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+        className: `inline-flex items-center rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${s.bg} ${s.fg}`,
+        children: label ?? s.label
     }, void 0, false, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 70,
-        columnNumber: 36
-    }, this);
-    if (upper === "HIGH") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "danger",
-        children: "High"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 71,
-        columnNumber: 32
-    }, this);
-    if (upper === "MEDIUM") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "warning",
-        children: "Medium"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 72,
-        columnNumber: 34
-    }, this);
-    if (upper === "LOW") return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "accent",
-        children: "Low"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 73,
-        columnNumber: 31
-    }, this);
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-        tone: "neutral",
-        children: severity || "Unknown"
-    }, void 0, false, {
-        fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 74,
-        columnNumber: 10
+        lineNumber: 114,
+        columnNumber: 5
     }, this);
 }
 _c4 = SeverityBadge;
-function StatCard({ label, value, hint, tone = "neutral" }) {
-    const valueTone = tone === "success" ? "text-emerald-300" : tone === "warning" ? "text-amber-300" : tone === "danger" ? "text-red-300" : "text-text";
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Card, {
-        className: "px-5 py-4",
+function DecisionBadge({ decision }) {
+    const map = {
+        ALLOWED: "border-success/30 bg-success/10 text-success",
+        FLAGGED: "border-sev-medium/30 bg-sev-medium/10 text-sev-medium",
+        BLOCKED: "border-danger/35 bg-danger/12 text-danger"
+    };
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+        className: `inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium ${map[decision] ?? "border-border bg-surface-2 text-text-muted"}`,
         children: [
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "text-xs font-medium uppercase tracking-wide text-text-faint",
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "h-1.5 w-1.5 rounded-full bg-current"
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 134,
+                columnNumber: 7
+            }, this),
+            decision.charAt(0) + decision.slice(1).toLowerCase()
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 129,
+        columnNumber: 5
+    }, this);
+}
+_c5 = DecisionBadge;
+function LiveBadge({ live }) {
+    if (!live) {
+        return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+            className: "inline-flex items-center gap-1.5 rounded border border-border bg-surface-2 px-2 py-0.5 text-[11px] text-text-faint",
+            children: [
+                /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                    className: "h-1.5 w-1.5 rounded-full bg-text-faint"
+                }, void 0, false, {
+                    fileName: "[project]/src/components/ui.tsx",
+                    lineNumber: 144,
+                    columnNumber: 9
+                }, this),
+                "Offline"
+            ]
+        }, void 0, true, {
+            fileName: "[project]/src/components/ui.tsx",
+            lineNumber: 143,
+            columnNumber: 7
+        }, this);
+    }
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+        className: "inline-flex items-center gap-1.5 rounded border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "live-dot h-1.5 w-1.5 rounded-full bg-success"
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 151,
+                columnNumber: 7
+            }, this),
+            "Live"
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 150,
+        columnNumber: 5
+    }, this);
+}
+_c6 = LiveBadge;
+function StatCard({ label, value, hint, tone = "default", chart }) {
+    const toneClass = {
+        default: "text-text",
+        good: "text-success",
+        warn: "text-warning",
+        bad: "text-danger",
+        accent: "text-accent"
+    }[tone];
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "rounded-xl border border-border bg-surface p-4",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "eyebrow",
                 children: label
             }, void 0, false, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 98,
+                lineNumber: 181,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                className: `mt-2 text-2xl font-semibold tabular-nums ${valueTone}`,
-                children: value
-            }, void 0, false, {
+                className: "mt-2 flex items-end justify-between gap-3",
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                        className: `tabular text-[27px] font-semibold leading-none ${toneClass}`,
+                        children: value
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/ui.tsx",
+                        lineNumber: 183,
+                        columnNumber: 9
+                    }, this),
+                    chart
+                ]
+            }, void 0, true, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 99,
+                lineNumber: 182,
                 columnNumber: 7
             }, this),
-            hint && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "mt-1 text-xs text-text-muted",
+            hint && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "mt-2 text-[11.5px] text-text-faint",
                 children: hint
             }, void 0, false, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 100,
+                lineNumber: 186,
                 columnNumber: 16
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 97,
+        lineNumber: 180,
         columnNumber: 5
     }, this);
 }
-_c5 = StatCard;
-function Spinner({ className = "" }) {
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        className: `h-4 w-4 animate-spin rounded-full border-2 border-border-strong border-t-accent ${className}`
+_c7 = StatCard;
+function Sparkline({ values, width = 96, height = 30, stroke = "var(--accent)" }) {
+    if (values.length < 2) return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        style: {
+            width,
+            height
+        }
     }, void 0, false, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 107,
+        lineNumber: 206,
+        columnNumber: 33
+    }, this);
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const span = max - min || 1;
+    const step = width / (values.length - 1);
+    const pts = values.map((v, i)=>[
+            i * step,
+            height - (v - min) / span * (height - 3) - 1.5
+        ]);
+    const d = pts.map((p, i)=>`${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+    const area = `${d} L${width},${height} L0,${height} Z`;
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("svg", {
+        width: width,
+        height: height,
+        className: "overflow-visible",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("path", {
+                d: area,
+                fill: stroke,
+                opacity: 0.1
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 216,
+                columnNumber: 7
+            }, this),
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("path", {
+                d: d,
+                fill: "none",
+                stroke: stroke,
+                strokeWidth: 1.5,
+                strokeLinejoin: "round",
+                strokeLinecap: "round"
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 217,
+                columnNumber: 7
+            }, this)
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 215,
         columnNumber: 5
     }, this);
 }
-_c6 = Spinner;
+_c8 = Sparkline;
+function SeverityBar({ counts, total }) {
+    const order = [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "none"
+    ];
+    const sum = total ?? order.reduce((a, k)=>a + (counts[k] || 0), 0);
+    if (!sum) {
+        return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+            className: "h-1.5 w-full rounded-full bg-surface-2"
+        }, void 0, false, {
+            fileName: "[project]/src/components/ui.tsx",
+            lineNumber: 235,
+            columnNumber: 12
+        }, this);
+    }
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "flex h-1.5 w-full overflow-hidden rounded-full bg-surface-2",
+        children: order.map((k)=>counts[k] ? /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                style: {
+                    width: `${counts[k] / sum * 100}%`,
+                    background: `var(--sev-${k})`
+                },
+                title: `${k}: ${counts[k]}`
+            }, k, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 241,
+                columnNumber: 11
+            }, this) : null)
+    }, void 0, false, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 238,
+        columnNumber: 5
+    }, this);
+}
+_c9 = SeverityBar;
+function ScoreRing({ score, size = 56 }) {
+    const r = (size - 6) / 2;
+    const c = 2 * Math.PI * r;
+    const pct = score === null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+    const color = score === null ? "var(--sev-none)" : score >= 80 ? "var(--success)" : score >= 50 ? "var(--warning)" : "var(--danger)";
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "relative",
+        style: {
+            width: size,
+            height: size
+        },
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("svg", {
+                width: size,
+                height: size,
+                className: "-rotate-90",
+                children: [
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("circle", {
+                        cx: size / 2,
+                        cy: size / 2,
+                        r: r,
+                        fill: "none",
+                        stroke: "var(--surface-2)",
+                        strokeWidth: 4
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/ui.tsx",
+                        lineNumber: 261,
+                        columnNumber: 9
+                    }, this),
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("circle", {
+                        cx: size / 2,
+                        cy: size / 2,
+                        r: r,
+                        fill: "none",
+                        stroke: color,
+                        strokeWidth: 4,
+                        strokeLinecap: "round",
+                        strokeDasharray: `${c * pct} ${c}`
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/ui.tsx",
+                        lineNumber: 262,
+                        columnNumber: 9
+                    }, this)
+                ]
+            }, void 0, true, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 260,
+                columnNumber: 7
+            }, this),
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                className: "absolute inset-0 flex items-center justify-center",
+                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                    className: "tabular text-[13px] font-semibold",
+                    style: {
+                        color
+                    },
+                    children: score === null ? "—" : Math.round(score)
+                }, void 0, false, {
+                    fileName: "[project]/src/components/ui.tsx",
+                    lineNumber: 274,
+                    columnNumber: 9
+                }, this)
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 273,
+                columnNumber: 7
+            }, this)
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 259,
+        columnNumber: 5
+    }, this);
+}
+_c10 = ScoreRing;
+function Spinner({ label }) {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "flex items-center gap-2 text-text-faint",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "h-3.5 w-3.5 animate-spin rounded-full border-2 border-border-strong border-t-accent"
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 287,
+                columnNumber: 7
+            }, this),
+            label && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "text-[13px]",
+                children: label
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 288,
+                columnNumber: 17
+            }, this)
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 286,
+        columnNumber: 5
+    }, this);
+}
+_c11 = Spinner;
 function EmptyState({ title, hint }) {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        className: "flex flex-col items-center justify-center gap-1 px-6 py-14 text-center",
+        className: "flex flex-col items-center justify-center px-6 py-12 text-center",
         children: [
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "text-sm font-medium text-text-muted",
+                className: "text-[13px] font-medium text-text-muted",
                 children: title
             }, void 0, false, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 116,
+                lineNumber: 296,
                 columnNumber: 7
             }, this),
             hint && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "max-w-sm text-xs text-text-faint",
+                className: "mt-1 max-w-md text-xs text-text-faint",
                 children: hint
             }, void 0, false, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 117,
+                lineNumber: 297,
                 columnNumber: 16
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 115,
+        lineNumber: 295,
         columnNumber: 5
     }, this);
 }
-_c7 = EmptyState;
-function ErrorState({ message }) {
+_c12 = EmptyState;
+function ErrorState({ message, onRetry }) {
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-        className: "flex flex-col items-center justify-center gap-2 px-6 py-14 text-center",
+        className: "flex flex-col items-center justify-center gap-3 rounded-xl border border-danger/25 bg-danger/5 px-6 py-8 text-center",
         children: [
-            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Badge, {
-                tone: "danger",
-                children: "Connection error"
-            }, void 0, false, {
-                fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 125,
-                columnNumber: 7
-            }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
-                className: "max-w-md text-xs text-text-faint",
+                className: "text-[13px] text-danger",
                 children: message
             }, void 0, false, {
                 fileName: "[project]/src/components/ui.tsx",
-                lineNumber: 126,
+                lineNumber: 305,
+                columnNumber: 7
+            }, this),
+            onRetry && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(Button, {
+                size: "sm",
+                onClick: onRetry,
+                children: "Retry"
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 307,
+                columnNumber: 9
+            }, this)
+        ]
+    }, void 0, true, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 304,
+        columnNumber: 5
+    }, this);
+}
+_c13 = ErrorState;
+function Mono({ children, className = "" }) {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+        className: `font-mono text-[11.5px] ${className}`,
+        children: children
+    }, void 0, false, {
+        fileName: "[project]/src/components/ui.tsx",
+        lineNumber: 316,
+        columnNumber: 10
+    }, this);
+}
+_c14 = Mono;
+function KeyValue({ k, v }) {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+        className: "flex items-baseline justify-between gap-4 py-1",
+        children: [
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "shrink-0 text-[11.5px] text-text-faint",
+                children: k
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 322,
+                columnNumber: 7
+            }, this),
+            /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
+                className: "tabular min-w-0 truncate text-right text-[12px] text-text",
+                children: v
+            }, void 0, false, {
+                fileName: "[project]/src/components/ui.tsx",
+                lineNumber: 323,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/ui.tsx",
-        lineNumber: 124,
+        lineNumber: 321,
         columnNumber: 5
     }, this);
 }
-_c8 = ErrorState;
-var _c, _c1, _c2, _c3, _c4, _c5, _c6, _c7, _c8;
+_c15 = KeyValue;
+function bytes(n) {
+    if (n === null || n === undefined) return "—";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+function num(n) {
+    return n === null || n === undefined ? "—" : n.toLocaleString();
+}
+function relativeTime(iso) {
+    if (!iso) return "—";
+    const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
+    if (Number.isNaN(then)) return iso;
+    const secs = Math.max(0, (Date.now() - then) / 1000);
+    if (secs < 45) return "just now";
+    if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+    return `${Math.round(secs / 86400)}d ago`;
+}
+function formatTime(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+    });
+}
+var _c, _c1, _c2, _c3, _c4, _c5, _c6, _c7, _c8, _c9, _c10, _c11, _c12, _c13, _c14, _c15;
 __turbopack_context__.k.register(_c, "Card");
 __turbopack_context__.k.register(_c1, "CardHeader");
-__turbopack_context__.k.register(_c2, "Badge");
-__turbopack_context__.k.register(_c3, "DecisionBadge");
+__turbopack_context__.k.register(_c2, "PageHeader");
+__turbopack_context__.k.register(_c3, "Button");
 __turbopack_context__.k.register(_c4, "SeverityBadge");
-__turbopack_context__.k.register(_c5, "StatCard");
-__turbopack_context__.k.register(_c6, "Spinner");
-__turbopack_context__.k.register(_c7, "EmptyState");
-__turbopack_context__.k.register(_c8, "ErrorState");
+__turbopack_context__.k.register(_c5, "DecisionBadge");
+__turbopack_context__.k.register(_c6, "LiveBadge");
+__turbopack_context__.k.register(_c7, "StatCard");
+__turbopack_context__.k.register(_c8, "Sparkline");
+__turbopack_context__.k.register(_c9, "SeverityBar");
+__turbopack_context__.k.register(_c10, "ScoreRing");
+__turbopack_context__.k.register(_c11, "Spinner");
+__turbopack_context__.k.register(_c12, "EmptyState");
+__turbopack_context__.k.register(_c13, "ErrorState");
+__turbopack_context__.k.register(_c14, "Mono");
+__turbopack_context__.k.register(_c15, "KeyValue");
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }

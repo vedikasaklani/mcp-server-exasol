@@ -468,7 +468,7 @@ def create_scan_run(session: Session, server_id: str, commit_sha: str) -> ScanRu
 # finding dict is analyzer-specific and gets kept in `details` rather than
 # dropped. "message" and "threat_summary" are coalesced into one column,
 # so both are excluded here even though only one of them becomes a column.
-_RULE_FINDING_CORE_KEYS = {"rule_id", "file", "line", "message", "threat_summary", "severity", "analyzer", "tool_name"}
+_RULE_FINDING_CORE_KEYS = {"rule_id", "file", "file_path", "line", "message", "threat_summary", "severity", "analyzer", "tool_name"}
 
 
 def _rule_finding_kwargs(finding: dict) -> dict:
@@ -481,7 +481,12 @@ def _rule_finding_kwargs(finding: dict) -> dict:
         "analyzer": finding.get("analyzer", "unknown"),
         "severity": finding.get("severity", "LOW"),
         "rule_id": finding.get("rule_id"),
-        "file": finding.get("file"),
+        # "file_path" is what semgrep's JSON, this project's own scanner and
+        # the documented curl examples all call it. Accepting only "file"
+        # meant a finding kept its severity and message but silently lost
+        # its location into the details blob, so the dashboard could say a
+        # credential was hardcoded without saying where.
+        "file": finding.get("file") or finding.get("file_path"),
         "line": finding.get("line"),
         "message": finding.get("message") or finding.get("threat_summary"),
         "details": details or None,

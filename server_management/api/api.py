@@ -8,6 +8,7 @@ Thin wrapper over onboard_services.py:
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from typing import Any
 
@@ -127,7 +128,16 @@ def recover_interrupted_scans():
     with session_scope() as db:
         mark_interrupted_scans_failed(db)
         _backfill_telemetry_identities(db)
-    warden_sessions.reconcile_all()
+    # Reconciliation brings every ready server back up, and each one means a
+    # checkout or install, a learning run and a container pool warmup. Doing
+    # that inline holds the whole API unavailable for minutes on a fleet of
+    # any size - and the endpoints that need a session start one on demand
+    # anyway, so nothing depends on this having finished.
+    threading.Thread(
+        target=warden_sessions.reconcile_all,
+        name="warden-startup-reconcile",
+        daemon=True,
+    ).start()
 
 
 def _backfill_telemetry_identities(db: Session) -> None:

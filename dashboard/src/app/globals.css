@@ -1,30 +1,54 @@
 @import "tailwindcss";
 
+/*
+  Palette notes: this is an operations console read for long stretches, so
+  the base is a near-black blue-grey rather than pure black (less halation
+  on OLED, less glare on LCD) and surfaces step up in small increments so
+  nesting stays legible without borders doing all the work. The primary
+  accent is teal rather than the usual dashboard blue, which frees the blue
+  end of the spectrum to mean nothing in particular and keeps saturated
+  colour reserved for severity - if everything is accented, severity stops
+  reading as a signal.
+*/
 :root {
-  --bg: #0b0f17;
-  --bg-elevated: #111827;
-  --surface: #151b28;
-  --surface-hover: #1b2333;
-  --border: #232b3d;
-  --border-strong: #2e394f;
-  --text: #e6e9ef;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
-  --accent: #3b82f6;
-  --accent-soft: #1d4ed8;
-  --accent-bg: rgba(59, 130, 246, 0.12);
-  --success: #22c55e;
-  --success-bg: rgba(34, 197, 94, 0.12);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.14);
-  --danger: #ef4444;
-  --danger-bg: rgba(239, 68, 68, 0.14);
+  --bg: #080b10;
+  --bg-elevated: #0d1118;
+  --surface: #11161f;
+  --surface-2: #161c27;
+  --surface-hover: #1b2230;
+  --border: #1e2632;
+  --border-strong: #2c3644;
+
+  --text: #e8ecf2;
+  --text-muted: #97a3b6;
+  --text-faint: #5f6b7d;
+
+  --accent: #2dd4bf;
+  --accent-dim: #14b8a6;
+  --accent-bg: rgba(45, 212, 191, 0.1);
+  --accent-border: rgba(45, 212, 191, 0.3);
+
+  /* Severity ramp. Deliberately monotonic in both hue and lightness so it
+     survives greyscale printing and the common forms of colour blindness. */
+  --sev-none: #64748b;
+  --sev-low: #38bdf8;
+  --sev-medium: #fbbf24;
+  --sev-high: #fb923c;
+  --sev-critical: #f43f5e;
+
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.12);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --danger: #f43f5e;
+  --danger-bg: rgba(244, 63, 94, 0.12);
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-bg-elevated: var(--bg-elevated);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-surface-hover: var(--surface-hover);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
@@ -32,12 +56,17 @@
   --color-text-muted: var(--text-muted);
   --color-text-faint: var(--text-faint);
   --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
+  --color-accent-dim: var(--accent-dim);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-sev-none: var(--sev-none);
+  --color-sev-low: var(--sev-low);
+  --color-sev-medium: var(--sev-medium);
+  --color-sev-high: var(--sev-high);
+  --color-sev-critical: var(--sev-critical);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
 }
 
 html {
@@ -47,16 +76,51 @@ html {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers in tables and metrics must line up column-wise; proportional
+   digits make a column of latencies impossible to scan down. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Small caps-style section labels, used instead of heavier headings so the
+   page has hierarchy without competing weights. */
+.eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 ::selection {
-  background: var(--accent-soft);
-  color: white;
+  background: var(--accent-dim);
+  color: #04100e;
 }
 
 * {
   scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+  70% { box-shadow: 0 0 0 5px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+.live-dot {
+  animation: pulse-ring 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes row-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.row-in {
+  animation: row-in 180ms ease-out;
 }
