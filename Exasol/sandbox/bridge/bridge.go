@@ -413,6 +413,30 @@ func (o *Observer) assessCall(req runtime.ExecRequest, out pool.RequestOutcome, 
 			"credential access refused: "+strings.Join(refusedCreds, ", "))
 	}
 
+	// Reading another process's environment block is credential harvesting:
+	// tokens and keys are passed to processes as environment variables far
+	// more often than they are written to a file. analyze's sensitive-path
+	// list deliberately stays narrow (an earlier broad version produced 543
+	// meaningless findings on one run), so this is called out here as its
+	// own signal rather than by widening that list.
+	var environReads []string
+	for p, acc := range w.Paths {
+		if acc.Kind == analyze.AccessStat {
+			continue
+		}
+		if strings.HasPrefix(p, "/proc/") && strings.HasSuffix(p, "/environ") {
+			environReads = append(environReads, p)
+		}
+	}
+	sort.Strings(environReads)
+	if len(environReads) > 0 {
+		a.sensitive = true
+		a.categories = append(a.categories, "process_environment_read")
+		a.note("high",
+			fmt.Sprintf("read %d process environment block(s)", len(environReads)),
+			"process environment read: "+strings.Join(environReads, ", "))
+	}
+
 	// Anything executed beyond the declared entrypoint.
 	if len(w.Execs) > 0 {
 		a.note("high",

@@ -12,145 +12,24 @@ sections 0, 1 and 7.
 
 ---
 
-## 0. Setup — do this before the demo, not during it
-
-### 0.1 Data stores
+## 0. Setup — one command
 
 ```bash
-docker exec mcpwarden-pg pg_isready -U postgres
+cp .env.example .env      # fill in your Exasol credentials
+./warden up
 ```
 
-If that fails, recreate it and **wait** — a container that reports `Up`
-is not necessarily accepting connections on the mapped host port yet, and
-under WSL2 the port mapping itself occasionally fails to establish:
+Open **http://localhost:3000**.
 
-```bash
-docker rm -f mcpwarden-pg
-docker run -d --name mcpwarden-pg -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=warden -p 15432:5432 postgres:16-alpine
-sleep 10 && docker exec mcpwarden-pg pg_isready -U postgres
-```
+`./warden up` is idempotent: anything already listening is left alone, and
+it starts only what is missing. Run it again any time something has fallen
+over. `./warden status` shows what is up; `./warden logs api` tails a log.
 
-`docker exec ... psql` bypasses the host port mapping entirely, so it can
-succeed while the API still cannot connect. Trust `pg_isready` over it.
+> **Expected noise:** a `GITHUB_PRIVATE_KEY` / JWT traceback in the API log
+> after registering is normal with placeholder credentials. Public repos and
+> npm packages need no token. Say so before someone spots it.
 
-Make sure your Exasol instance is up too, then apply migrations:
-
-```bash
-export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:15432/warden"
-python3 -m alembic upgrade head
-```
-
-### 0.2 Check the ports are free
-
-```bash
-ss -ltn | grep -E '8000|8100|3000|9500'
-```
-
-Anything listening is a leftover from a previous run and will cause an
-`address already in use` that is easy to misread as a code failure. If
-`lsof`/`fuser` are not installed, this finds the owners:
-
-```bash
-python3 - <<'EOF'
-import os
-t={l.split()[9] for f in ('/proc/net/tcp','/proc/net/tcp6')
-   for l in open(f).readlines()[1:]
-   if int(l.split()[1].split(':')[1],16) in (8000,8100,3000,9500) and l.split()[3]=='0A'}
-for pid in filter(str.isdigit, os.listdir('/proc')):
-    try: fds=os.listdir(f'/proc/{pid}/fd')
-    except Exception: continue
-    for fd in fds:
-        try: link=os.readlink(f'/proc/{pid}/fd/{fd}')
-        except Exception: continue
-        if link.startswith('socket:[') and link[8:-1] in t:
-            print(pid, open(f'/proc/{pid}/cmdline','rb').read().decode(errors='ignore')[:80])
-EOF
-```
-
-### 0.3 Build the Go binaries and the demo repositories
-
-```bash
-cd Exasol
-go build -o /tmp/warden-bin/warden-observe ./cmd/warden-observe
-go build -o /tmp/warden-bin/warden-serve   ./cmd/warden-serve
-go build -o /tmp/warden-bin/probe          ./sandbox/runtime/runsc/probe
-cd ..
-
-bash scripts/make_demo_repos.sh          # creates /tmp/warden-demo
-```
-
-That produces two repositories laid out as `owner/repo`, so they go through
-exactly the same checkout path a real GitHub repo does:
-
-| Repo | What it is |
-|---|---|
-| `demo/mcp` | a well-behaved MCP server (`echo`, `new_id`, `add`) with a real npm dependency |
-| `demo/evil` | the malicious fixture: reads credential files, returns secret-shaped and injection-shaped content |
-
-### 0.4 Start the four processes
-
-First check whether they are already running:
-
-```bash
-ss -ltn | grep -E '8000|8100|3000|9500'
-```
-
-Anything listed is already up — **leave it alone**. Starting a second copy
-just gives you `Address already in use`, which reads like a failure and is
-not one. The git fixture in particular serves the repositories from disk on
-every request, so rebuilding them with `make_demo_repos.sh` does not need a
-restart.
-
-For whatever is *not* running, use a terminal each and leave them in the
-foreground — you want to be able to point at the logs during the demo.
-
-**Terminal A — git fixture host**
-```bash
-python3 scripts/demo_git_server.py /tmp/warden-demo 9500
-```
-
-**Terminal B — API**
-```bash
-export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:15432/warden"
-export GITHUB_WEBHOOK_SECRET=test-secret GITHUB_APP_ID=1 GITHUB_PRIVATE_KEY=test
-export WARDEN_RUNNER_URL=http://127.0.0.1:8100
-python3 -m uvicorn server_management.api.api:app --port 8000
-```
-
-**Terminal C — Warden runner**
-```bash
-export WARDEN_OBSERVE_BIN=/tmp/warden-bin/warden-observe
-export WARDEN_SERVE_BIN=/tmp/warden-bin/warden-serve
-export WARDEN_PROBE_BIN=/tmp/warden-bin/probe
-export WARDEN_TELEMETRY_API=http://127.0.0.1:8000
-export WARDEN_RUNSC_BIN=$(which runsc)
-export WARDEN_GIT_BASE_URL=http://127.0.0.1:9500
-python3 -m uvicorn server_management.warden_runner:app --port 8100
-```
-
-**Terminal D — dashboard**
-```bash
-cd dashboard && npm run dev
-```
-
-### 0.5 Confirm all four
-
-```bash
-curl -s localhost:8000/health          # {"status":"ok","exasol":true,"postgres":true}
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8100/docs   # 200
-curl -s -o /dev/null -w '%{http_code}\n' localhost:3000        # 200
-```
-
-`"status":"ok"` requires **both** stores. If it says `degraded`, read which
-one is false rather than guessing.
-
-> **Expected noise:** a `GITHUB_PRIVATE_KEY` / JWT traceback in Terminal B
-> after registering a server is normal with placeholder credentials. It does
-> not block registration, scanning, running, or scoring. Say so before
-> someone spots it.
-
----
+Full detail, prerequisites and troubleshooting: `QUICKSTART.md`.
 
 ## 1. Register a server — Discovery Hub
 
@@ -192,7 +71,7 @@ curl -i -X POST localhost:8000/servers -H 'Content-Type: application/json' \
 ## 2. Scan it
 
 ```bash
-source /tmp/warden-demo/shas.env
+source .warden-run/fixtures/shas.env
 
 RID=$(curl -s -X POST localhost:8000/scan-runs -H 'Content-Type: application/json' \
   -d "{\"server_id\":\"$SID\",\"commit_sha\":\"$MCP_SHA\"}" \
@@ -246,7 +125,7 @@ seconds — it is doing real work: clone, shallow-fetch that exact commit,
 `npm install`, generate a capability profile by observing a learning run,
 then warm a pool of gVisor containers.
 
-Watch Terminal C while it happens. Call out these lines:
+Watch `./warden logs runner` while it happens. Call out these lines:
 
 ```
 installing npm dependencies (UNCONFINED on this host ...)
@@ -298,9 +177,14 @@ counts, latency percentiles, syscall and path counts, bytes in and out.
 
 ## 6. Audit trail
 
-**Audit & Activity** in the dashboard. Every call you just made is there,
-newest first, with tool name, decision, latency and session id. Filter by
-server and by decision.
+**Audit Trail** in the dashboard. Every call you just made is there, newest
+first, with decision, per-call severity, latency and what the kernel
+measured. Filter by server, decision or severity.
+
+**Click a row.** It expands into the verdict, the exact evidence behind it,
+any detector findings raised during that same call, and the syscall, path
+and byte counts gVisor recorded. A dash means *not observed*, not zero —
+the trace is asynchronous, so a very recent call may still be catching up.
 
 ```bash
 curl -s "localhost:8000/servers/$SID/runtime-events?limit=10" | python3 -m json.tool
@@ -355,9 +239,24 @@ curl -s -X POST localhost:8000/servers/$EID/call -H 'Content-Type: application/j
   -d '{"tool_name":"exfiltrate","arguments":{}}'
 ```
 
-It tries to read `/etc/shadow`, an SSH private key, and AWS credentials.
-Every one comes back `ENOENT`. **Those files exist on the host.** gVisor is
-what makes them not exist for this process.
+It tries to read `/etc/shadow`, an SSH private key, AWS credentials, the
+npm token and the Docker config. Every one comes back `ENOENT`. **Those
+files exist on the host.** gVisor is what makes them not exist for this
+process.
+
+The fixture exposes six tools, one per attack class, so you can show that
+the detectors discriminate rather than flagging everything:
+
+| Tool | What it attempts | Verdict |
+|---|---|---|
+| `exfiltrate` | reads credential stores, spawns a shell | **high** — names each refused path |
+| `call_home` | connects to undeclared destinations | **critical** — names the destination |
+| `enumerate_host` | inventories the filesystem, reads process environments | **high** — environment harvesting |
+| `persist` | writes crontab, bashrc, authorized_keys | **high** — refused write attempt |
+| `leak_secret` | returns credential-shaped content | **high** — on response content |
+| `prompt_injection` | returns instruction-shaped content | **medium** — injection patterns |
+
+Run each and watch the Audit Trail. Expand any row to see the evidence.
 
 ```bash
 curl -s -X POST localhost:8000/servers/$EID/call -H 'Content-Type: application/json' \
@@ -459,9 +358,9 @@ platform worked that out by running them.
 | Registration fails with 422 | Repo URL is not GitHub-shaped; the response says so |
 | Registration fails with 409 | Already registered |
 | `live/tools` returns 503 | No launch command, or no passed scan — §1 and §2 |
-| `live/tools` returns 502 | Session could not start; the message carries the reason, and Terminal C has the detail |
+| `live/tools` returns 502 | Session could not start; the message carries the reason, and `./warden logs runner` has the detail |
 | `warmup:initialize timed out` | Source checked out on a `/mnt/c/...` drvfs path — see `HOSTCONFIG_INTEGRATION.md` §0 |
-| `address already in use` | Leftover process from an earlier run — §0.2 |
+| `address already in use` | It is already running. `./warden status`. |
 | JWT / `GITHUB_PRIVATE_KEY` traceback | Expected with placeholder credentials; harmless |
 
 Full reference: `HOSTCONFIG_INTEGRATION.md` — endpoints (§6), every bug
