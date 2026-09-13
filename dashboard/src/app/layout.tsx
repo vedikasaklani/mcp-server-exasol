@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono, DM_Sans, Inter, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
+import { cn } from "@/lib/utils";
+
+const nunitoSansHeading = Nunito_Sans({subsets:['latin'],variable:'--font-heading'});
+
+const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+
 
 // Plex reads as instrumentation rather than as a marketing site, and its
 // mono companion is metrically matched, so ids and counts sit correctly
@@ -27,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`dark ${plexSans.variable} ${plexMono.variable} h-full antialiased`}
+      className={cn("dark", "h-full", "antialiased", plexSans.variable, plexMono.variable, "font-sans", inter.variable, nunitoSansHeading.variable)}
     >
       <body className="min-h-full bg-bg text-text">
         <div className="flex h-screen overflow-hidden">

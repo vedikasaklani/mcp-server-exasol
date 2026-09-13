@@ -219,3 +219,6 @@ __marimo__/
 
 # Runtime state created by ./warden up
 .warden-run/
+
+# dashboard/src/lib is TypeScript, not a Python build dir
+!dashboard/src/lib/
