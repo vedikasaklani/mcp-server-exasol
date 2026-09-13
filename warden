@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+# MCP Warden - one command to stand the whole platform up.
+#
+#   ./warden up        start everything that is not already running
+#   ./warden status    what is up, what is not
+#   ./warden down      stop the services this script started
+#   ./warden reset     wipe both data stores (asks first)
+#   ./warden logs [svc] tail a service log: api | runner | dashboard | fixture
+#   ./warden doctor    check prerequisites only
+#
+# Every step is idempotent. Running `up` twice is safe and is the intended
+# way to bring back whatever has fallen over: a service that is already
+# listening is left strictly alone, because the most common way to break a
+# working setup is to restart half of it.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN="$ROOT/.warden-run"
+LOGS="$RUN/logs"
+BIN="$RUN/bin"
+FIXTURES="$RUN/fixtures"
+
+PG_CONTAINER="${WARDEN_PG_CONTAINER:-mcpwarden-pg}"
+PG_PORT="${WARDEN_PG_PORT:-15432}"
+API_PORT="${WARDEN_API_PORT:-8000}"
+RUNNER_PORT="${WARDEN_RUNNER_PORT:-8100}"
+UI_PORT="${WARDEN_UI_PORT:-3000}"
+FIXTURE_PORT="${WARDEN_FIXTURE_PORT:-9500}"
+
+export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:$PG_PORT/warden}"
+
+c_ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+c_skip() { printf '  \033[2m·\033[0m %s\n' "$1"; }
+c_warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
+c_err()  { printf '  \033[31m✗\033[0m %s\n' "$1"; }
+step()   { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- && return 0 || return 1; }
+have()      { command -v "$1" >/dev/null 2>&1; }
+
+# Which process is listening on a port. Recording $! at launch does not work
+# here: setsid forks, so the pid the shell sees exits immediately and the
+# server it started has a different one. lsof and fuser are not installed
+# everywhere, so resolve it through /proc directly.
+pid_on_port() {
+  python3 - "$1" <<'EOF'
+import os, sys
+want = int(sys.argv[1])
+inodes = set()
+for f in ("/proc/net/tcp", "/proc/net/tcp6"):
+    try:
+        for line in open(f).readlines()[1:]:
+            parts = line.split()
+            if int(parts[1].split(":")[1], 16) == want and parts[3] == "0A":
+                inodes.add(parts[9])
+    except OSError:
+        pass
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        for fd in os.listdir(f"/proc/{pid}/fd"):
+            try:
+                link = os.readlink(f"/proc/{pid}/fd/{fd}")
+            except OSError:
+                continue
+            if link.startswith("socket:[") and link[8:-1] in inodes:
+                print(pid)
+                sys.exit(0)
+    except OSError:
+        continue
+EOF
+}
+
+# ---------------------------------------------------------------- doctor
+
+doctor() {
+  local missing=0
+  step "Prerequisites"
+  for tool in docker python3 node npm git; do
+    if have "$tool"; then c_ok "$tool"; else c_err "$tool is required but not installed"; missing=1; fi
+  done
+  if have go; then c_ok "go ($(go version | awk '{print $3}'))"; else
+    c_warn "go not found - needed only to build the sandbox binaries"
+  fi
+  if have runsc; then
+    c_ok "runsc ($(runsc --version 2>/dev/null | head -1 | awk '{print $NF}'))"
+  else
+    c_warn "runsc (gVisor) not found - discovery, scanning and the audit trail all work without it, but servers cannot be run confined"
+    echo "      install: https://gvisor.dev/docs/user_guide/install/"
+  fi
+  if [ -f "$ROOT/.env" ]; then c_ok ".env present"; else
+    c_err ".env missing - copy .env.example and fill in your Exasol credentials"; missing=1
+  fi
+  # A source tree on a Windows drive mount makes gVisor unusably slow.
+  case "$(python3 - <<'EOF'
+import os
+p=os.path.realpath(".")
+best=("","")
+try:
+    for line in open("/proc/mounts"):
+        f=line.split()
+        if len(f)>2 and (p==f[1] or p.startswith(f[1].rstrip("/")+"/")) and len(f[1])>len(best[0]):
+            best=(f[1],f[2])
+except OSError: pass
+print(best[1])
+EOF
+)" in
+    drvfs|9p|cifs|nfs|fuse*)
+      c_err "this checkout is on a Windows/network mount - gVisor will time out. Move it onto a native Linux path (e.g. ~/mcp-server-exasol)."
+      missing=1 ;;
+  esac
+  return $missing
+}
+
+# ------------------------------------------------------------------- up
+
+up() {
+  mkdir -p "$LOGS" "$BIN" "$FIXTURES"
+  doctor || { echo; c_err "fix the above first"; exit 1; }
+
+  step "Data stores"
+  if docker ps --format '{{.Names}}' | grep -qx "$PG_CONTAINER"; then
+    c_skip "PostgreSQL container already running"
+  else
+    docker rm -f "$PG_CONTAINER" >/dev/null 2>&1
+    docker run -d --name "$PG_CONTAINER" \
+      -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=warden \
+      -p "$PG_PORT:5432" postgres:16-alpine >/dev/null
+    c_ok "PostgreSQL container started"
+  fi
+  # Container "Up" is not the same as accepting connections, and under WSL2
+  # the host port mapping itself sometimes takes a moment to establish.
+  printf '  · waiting for PostgreSQL'
+  for _ in $(seq 1 40); do
+    if docker exec "$PG_CONTAINER" pg_isready -U postgres >/dev/null 2>&1 && port_busy "$PG_PORT"; then
+      printf '\r'; c_ok "PostgreSQL accepting connections on :$PG_PORT"; break
+    fi
+    printf '.'; sleep 1
+  done
+  if ! port_busy "$PG_PORT"; then
+    printf '\r'; c_err "PostgreSQL never became reachable on :$PG_PORT"; exit 1
+  fi
+
+  if python3 -c "
+import os,sys
+for l in open('$ROOT/.env'):
+    l=l.strip()
+    if l and not l.startswith('#') and '=' in l:
+        k,v=l.split('=',1); os.environ.setdefault(k,v)
+import pyexasol
+pyexasol.connect(dsn=os.environ['EXASOL_DSN'],user=os.environ['EXASOL_USER'],password=os.environ['EXASOL_PASSWORD']).close()
+" >/dev/null 2>&1; then
+    c_ok "Exasol reachable"
+  else
+    c_err "Exasol unreachable - check EXASOL_DSN/USER/PASSWORD in .env and that your instance is running"
+    exit 1
+  fi
+
+  step "Schema"
+  if (cd "$ROOT" && python3 -m alembic upgrade head) >"$LOGS/migrate.log" 2>&1; then
+    c_ok "migrations applied"
+  else
+    c_err "migrations failed - see $LOGS/migrate.log"; exit 1
+  fi
+
+  step "Sandbox binaries"
+  if have go; then
+    local built=0
+    for pair in "warden-observe:./cmd/warden-observe" "warden-serve:./cmd/warden-serve" "probe:./sandbox/runtime/runsc/probe"; do
+      local name="${pair%%:*}" pkg="${pair##*:}"
+      if [ ! -x "$BIN/$name" ] || [ -n "$(find "$ROOT/Exasol" -name '*.go' -newer "$BIN/$name" -print -quit 2>/dev/null)" ]; then
+        (cd "$ROOT/Exasol" && go build -o "$BIN/$name" "$pkg") >>"$LOGS/build.log" 2>&1 \
+          && { c_ok "built $name"; built=1; } || { c_err "failed to build $name - see $LOGS/build.log"; exit 1; }
+      fi
+    done
+    [ "$built" -eq 0 ] && c_skip "binaries already up to date"
+  else
+    c_warn "go missing - skipping (confined execution unavailable)"
+  fi
+
+  step "Demo fixtures"
+  if [ -f "$FIXTURES/shas.env" ] && [ -d "$FIXTURES/demo/mcp.git" ]; then
+    c_skip "fixture repositories already built"
+  else
+    bash "$ROOT/scripts/make_demo_repos.sh" "$FIXTURES" >"$LOGS/fixtures.log" 2>&1 \
+      && c_ok "built demo/mcp and demo/evil" || c_warn "fixture build failed - see $LOGS/fixtures.log"
+  fi
+
+  step "Services"
+  start_svc fixture "$FIXTURE_PORT" \
+    "python3 $ROOT/scripts/demo_git_server.py $FIXTURES $FIXTURE_PORT"
+
+  start_svc api "$API_PORT" \
+    "python3 -m uvicorn server_management.api.api:app --host 0.0.0.0 --port $API_PORT" \
+    "DATABASE_URL=$DATABASE_URL" \
+    "WARDEN_RUNNER_URL=http://127.0.0.1:$RUNNER_PORT" \
+    "GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-dev-secret}" \
+    "GITHUB_APP_ID=${GITHUB_APP_ID:-1}" \
+    "GITHUB_PRIVATE_KEY=${GITHUB_PRIVATE_KEY:-dev}"
+
+  start_svc runner "$RUNNER_PORT" \
+    "python3 -m uvicorn server_management.warden_runner:app --host 0.0.0.0 --port $RUNNER_PORT" \
+    "WARDEN_OBSERVE_BIN=$BIN/warden-observe" \
+    "WARDEN_SERVE_BIN=$BIN/warden-serve" \
+    "WARDEN_PROBE_BIN=$BIN/probe" \
+    "WARDEN_TELEMETRY_API=http://127.0.0.1:$API_PORT" \
+    "WARDEN_RUNSC_BIN=$(command -v runsc || echo runsc)" \
+    "WARDEN_GIT_BASE_URL=http://127.0.0.1:$FIXTURE_PORT" \
+    "WARDEN_GIT_BASE_OWNERS=demo"
+
+  if [ ! -d "$ROOT/dashboard/node_modules" ]; then
+    printf '  · installing dashboard dependencies (first run only)'
+    (cd "$ROOT/dashboard" && npm install --silent) >"$LOGS/npm.log" 2>&1 \
+      && { printf '\r'; c_ok "dashboard dependencies installed"; } \
+      || { printf '\r'; c_err "npm install failed - see $LOGS/npm.log"; exit 1; }
+  fi
+  [ -f "$ROOT/dashboard/.env.local" ] || \
+    echo "NEXT_PUBLIC_API_BASE_URL=http://localhost:$API_PORT" > "$ROOT/dashboard/.env.local"
+  start_svc dashboard "$UI_PORT" "npx next dev -p $UI_PORT" "" "" "" "" "$ROOT/dashboard"
+
+  step "Ready"
+  wait_http "http://127.0.0.1:$API_PORT/health" "API"
+  wait_http "http://127.0.0.1:$UI_PORT" "dashboard"
+  echo
+  printf '  \033[1;36m→  http://localhost:%s\033[0m\n\n' "$UI_PORT"
+  echo "  Next: Discovery → Connect a server → npm:@modelcontextprotocol/server-memory"
+  echo "  Logs: ./warden logs api | runner | dashboard | fixture"
+  echo
+}
+
+# start_svc <name> <port> <command> [ENV=VAL ...] [cwd as last arg if 7 args]
+start_svc() {
+  local name="$1" port="$2" cmd="$3"; shift 3
+  if port_busy "$port"; then
+    c_skip "$name already listening on :$port"
+    return 0
+  fi
+  local cwd="$ROOT"
+  local envs=()
+  for arg in "$@"; do
+    [ -z "$arg" ] && continue
+    if [ -d "$arg" ]; then cwd="$arg"; else envs+=("$arg"); fi
+  done
+  ( cd "$cwd" && env "${envs[@]}" PATH="$PATH" setsid nohup $cmd >"$LOGS/$name.log" 2>&1 </dev/null & )
+  for _ in $(seq 1 60); do
+    port_busy "$port" && { c_ok "$name started on :$port"; return 0; }
+    sleep 0.5
+  done
+  c_err "$name did not come up - see $LOGS/$name.log"
+  tail -5 "$LOGS/$name.log" 2>/dev/null | sed 's/^/      /'
+  return 1
+}
+
+wait_http() {
+  for _ in $(seq 1 40); do
+    curl -fsS -m 3 "$1" >/dev/null 2>&1 && { c_ok "$2 responding"; return 0; }
+    sleep 1
+  done
+  c_warn "$2 is not responding yet"
+}
+
+# --------------------------------------------------------------- status
+
+status() {
+  step "Services"
+  for pair in "PostgreSQL:$PG_PORT" "API:$API_PORT" "Warden runner:$RUNNER_PORT" "Dashboard:$UI_PORT" "Git fixture:$FIXTURE_PORT"; do
+    local n="${pair%%:*}" p="${pair##*:}"
+    if port_busy "$p"; then c_ok "$n  :$p"; else c_err "$n  :$p  not listening"; fi
+  done
+  step "Backend health"
+  curl -fsS -m 5 "http://127.0.0.1:$API_PORT/health" 2>/dev/null | sed 's/^/  /' || c_err "API not answering"
+  echo
+}
+
+# ----------------------------------------------------------------- down
+
+down() {
+  step "Stopping"
+  for pair in "dashboard:$UI_PORT" "runner:$RUNNER_PORT" "api:$API_PORT" "fixture:$FIXTURE_PORT"; do
+    local name="${pair%%:*}" port="${pair##*:}"
+    local pid
+    pid="$(pid_on_port "$port")"
+    if [ -n "$pid" ]; then
+      # Each service was started with setsid, so it leads its own process
+      # group; signalling the group takes its children (next-server's
+      # workers, uvicorn's reloader) with it instead of orphaning them.
+      kill -TERM -- "-$(ps -o pgid= "$pid" | tr -d ' ')" 2>/dev/null || kill "$pid" 2>/dev/null
+      c_ok "stopped $name (:$port)"
+    else
+      c_skip "$name was not running"
+    fi
+  done
+  rm -f "$RUN"/*.pid 2>/dev/null
+  # Confined sandboxes are children of the runner but outlive a plain kill.
+  python3 - <<'EOF'
+import os, signal
+killed = 0
+for pid in filter(str.isdigit, os.listdir('/proc')):
+    try:
+        cmd = open(f'/proc/{pid}/cmdline','rb').read().decode(errors='ignore')
+    except OSError:
+        continue
+    if 'warden-serve' in cmd or 'runsc' in cmd:
+        try:
+            os.kill(int(pid), signal.SIGKILL); killed += 1
+        except OSError:
+            pass
+print(f"  \033[32m✓\033[0m stopped {killed} sandbox process(es)" if killed else "  \033[2m·\033[0m no sandboxes running")
+EOF
+  echo "  (PostgreSQL container left running; 'docker stop $PG_CONTAINER' to stop it)"
+  echo
+}
+
+# ---------------------------------------------------------------- reset
+
+reset() {
+  echo "This deletes every registered server, audit event, finding and score"
+  echo "from BOTH PostgreSQL and Exasol."
+  read -r -p "Type 'reset' to confirm: " answer
+  [ "$answer" = "reset" ] || { echo "Cancelled."; exit 1; }
+  step "Resetting"
+  docker exec "$PG_CONTAINER" psql -U postgres -d warden -q -c \
+    "TRUNCATE tool_declarations, rule_findings, discovered_tools, llm_analysis_results,
+     rule_analysis_results, scan_runs, manifest_history, server_manifests, servers CASCADE;" \
+    >/dev/null 2>&1 && c_ok "PostgreSQL cleared" || c_err "PostgreSQL reset failed"
+  (cd "$ROOT" && python3 scripts/reset_telemetry.py --yes) | sed 's/^/  /'
+  c_warn "restart the API so it drops cached sessions:  ./warden down && ./warden up"
+  echo
+}
+
+case "${1:-up}" in
+  up)      up ;;
+  status)  status ;;
+  down)    down ;;
+  reset)   reset ;;
+  doctor)  doctor && { echo; c_ok "all prerequisites satisfied"; echo; } ;;
+  logs)    tail -f "$LOGS/${2:-api}.log" ;;
+  *)       sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac
