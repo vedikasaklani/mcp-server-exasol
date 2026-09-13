@@ -126,8 +126,8 @@ function ServerMonitor({
           rps.current = [...rps.current, delta / (POLL_MS / 1000)].slice(-HISTORY);
         }
         lastRequests.current = total;
-        const p95 = m.metrics.gauges.warden_latency_p95_ms;
-        if (typeof p95 === "number") latency.current = [...latency.current, p95].slice(-HISTORY);
+        const syscalls = m.metrics.gauges.warden_syscalls_observed;
+        if (typeof syscalls === "number") latency.current = [...latency.current, syscalls].slice(-HISTORY);
       }
     } catch {
       setLive(false);
@@ -188,7 +188,8 @@ function ServerMonitor({
         <StatCard
           label="Uptime"
           value={metrics ? formatUptime(metrics.metrics.uptime_seconds) : "—"}
-          hint={metrics ? <Mono>{metrics.profile_digest.slice(0, 19)}…</Mono> : "—"}
+          chart={<Sparkline values={latency.current} stroke="var(--sev-low)" />}
+          hint={metrics ? `${num(g.warden_syscalls_observed ?? null)} syscalls observed` : "—"}
         />
         <StatCard
           label="Reputation"
@@ -226,16 +227,22 @@ function ServerMonitor({
               right={<LiveBadge live />}
             />
             <div className="grid gap-x-8 gap-y-1 px-5 py-4 sm:grid-cols-2">
-              <KeyValue k="Syscalls observed" v={num(g.warden_syscalls_total ?? null)} />
+              <KeyValue k="Syscalls observed" v={num(g.warden_syscalls_observed ?? null)} />
               <KeyValue k="Distinct paths" v={num(g.warden_distinct_paths ?? null)} />
               <KeyValue k="File read" v={bytes(g.warden_file_read_bytes ?? null)} />
               <KeyValue k="File written" v={bytes(g.warden_file_write_bytes ?? null)} />
               <KeyValue k="Network out" v={bytes(g.warden_net_write_bytes ?? null)} />
               <KeyValue k="Network in" v={bytes(g.warden_net_read_bytes ?? null)} />
+              <KeyValue k="Network destinations" v={num(g.warden_network_destinations ?? null)} />
               <KeyValue k="Process spawns" v={num(g.warden_process_spawns ?? null)} />
-              <KeyValue k="Containers created" v={num(c.warden_containers_created_total ?? null)} />
               <KeyValue k="Idle syscalls" v={num(g.warden_idle_syscalls ?? null)} />
-              <KeyValue k="Analysis healthy" v={g.warden_analysis_healthy ? "yes" : "no"} />
+              <KeyValue k="Containers created" v={num(c.warden_containers_created_total ?? null)} />
+              <KeyValue k="Containers quarantined" v={num(c.warden_containers_quarantined_total ?? null)} />
+              <KeyValue k="Requests failed" v={num(c.warden_request_failures_total ?? null)} />
+              <KeyValue k="Pool idle / in use" v={`${num(g.warden_pool_idle ?? null)} / ${num(g.warden_pool_in_use ?? null)}`} />
+              {/* A dropped trace event is a gap in the evidence, so it is
+                  reported rather than quietly averaged away. */}
+              <KeyValue k="Trace events" v={`${num(g.warden_trace_events_ingested ?? null)} in, ${num(g.warden_trace_events_dropped ?? null)} dropped`} />
             </div>
             <div className="border-t border-border px-5 py-4">
               <div className="eyebrow mb-2">Findings in this session</div>
