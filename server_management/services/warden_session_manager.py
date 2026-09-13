@@ -60,7 +60,18 @@ class WardenSessionManager:
             server = db.get(Server, server_id)
             if manifest is None or latest is None or server is None:
                 return None
-            if latest.status not in _READY_STATUSES or not manifest.launch_executable:
+            if latest.status not in _READY_STATUSES:
+                return None
+            executable = manifest.launch_executable
+            is_npm = server.repo_url.strip().lower().startswith("npm:")
+            if not executable and is_npm:
+                # An npm package declares its own entrypoint and the runner
+                # reads it, so requiring an operator to name one first would
+                # be asking them to restate what the package already says.
+                # The interpreter is still explicit because gVisor loads the
+                # launch executable by parsing its ELF header.
+                executable = "node"
+            if not executable:
                 return None
             # The runner owns the real session state. Ask it before starting
             # anything: this process may have restarted, or the session may
@@ -88,7 +99,7 @@ class WardenSessionManager:
                 server_id=server_id,
                 repo_url=server.repo_url,
                 commit_sha=latest.commit_sha,
-                executable=manifest.launch_executable,
+                executable=executable,
                 args=list(manifest.launch_args or []),
                 git_token=git_token,
             )

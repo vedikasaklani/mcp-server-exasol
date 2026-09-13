@@ -34,11 +34,15 @@ from server_management.api.models import (
 )
 from server_management.database.db_config import get_db, session_scope
 from server_management.database.db_models import (
+    LlmVerdict,
+    RuleVerdict,
     ScanRun,
     Server,
     ServerManifest,
 )
 from server_management.services.onboard_services import (
+    artifact_ref,
+    normalize_npm_source,
     create_scan_run,
     get_manifest,
     get_tool_declarations_for_llm_phase,
@@ -168,9 +172,10 @@ def api_register_server(
     # dashboard as a bare "Registration failed" with nothing an operator can
     # act on. They are the two overwhelmingly common ways registration is
     # refused, so each gets a status code and a message that says what to fix.
+    repo_url = _pin_npm_version(req.repo_url)
     try:
         server = register_server(
-            db, repo_url=req.repo_url,
+            db, repo_url=repo_url,
             installation_id=req.installation_id,
             allowed_destinations=req.allowed_destinations,
             launch_executable=req.launch_executable,
@@ -182,7 +187,7 @@ def api_register_server(
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"{req.repo_url} is already registered",
+            detail=f"{repo_url} is already registered",
         ) from exc
     # Seed the Exasol side of the identity immediately, pinned to the
     # PostgreSQL UUID. Without this a server only becomes visible to the
@@ -291,6 +296,37 @@ async def api_upload_warden_profile(
 class ToolCallRequest(BaseModel):
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+def _pin_npm_version(repo_url: str) -> str:
+    """Resolve an unpinned npm source to the version published right now.
+
+    An npm package without a version is a moving target: the code behind an
+    approved capability profile could change on any later install, which is
+    the supply-chain substitution this platform exists to catch. Resolving
+    it once at registration makes the stored identity name an immutable
+    artifact, the way a commit does for a git source.
+    """
+    try:
+        normalized = normalize_npm_source(repo_url)
+    except ValueError:
+        return repo_url  # let register_server produce the 422
+    if normalized is None or "@" in normalized[4:].lstrip("@"):
+        return repo_url if normalized is None else normalized
+    package = normalized[4:]
+    try:
+        response = httpx.get(
+            f"https://registry.npmjs.org/{package.replace('/', '%2f')}/latest",
+            timeout=20.0,
+        )
+        response.raise_for_status()
+        version = response.json()["version"]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"could not resolve the current version of {package} from npm: {exc}",
+        ) from exc
+    return f"npm:{package}@{version}"
 
 
 def _gateway_address(server_id: str) -> str:
@@ -405,11 +441,152 @@ def api_list_tools(server_id: str | None = None, q: str | None = None):
 #internal, service-to-service
 @app.post("/scan-runs", response_model=ScanRunResponse)
 def api_create_scan_run(req: CreateScanRunRequest, db: Session = Depends(get_db)):
-    run = create_scan_run(db, server_id=req.server_id, commit_sha=req.commit_sha)
+    commit_sha = req.commit_sha
+    if not commit_sha:
+        server = db.get(Server, req.server_id)
+        if server is None:
+            raise HTTPException(status_code=404, detail="server not found")
+        commit_sha = artifact_ref(server.repo_url)
+        if commit_sha is None:
+            raise HTTPException(
+                status_code=422,
+                detail="commit_sha is required for a git source",
+            )
+    run = create_scan_run(db, server_id=req.server_id, commit_sha=commit_sha)
     return ScanRunResponse(
         scan_run_id=run.scan_run_id, server_id=run.server_id,
         commit_sha=run.commit_sha, status=run.status,
     )
+
+
+@app.post("/servers/{server_id}/scan")
+def api_run_scan(server_id: str, db: Session = Depends(get_db)):
+    """Fetch this server's source and scan it, end to end, in one call.
+
+    The two-phase /scan-runs endpoints exist for an external analyzer that
+    reports results back. That is the right shape for a CI-driven scan and
+    the wrong shape for an operator who has just registered a server and
+    wants to know whether it is safe to run, so this drives the whole
+    lifecycle itself and returns the findings.
+    """
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="server not found")
+
+    commit_sha = artifact_ref(server.repo_url)
+    if commit_sha is None:
+        latest = (
+            db.query(ScanRun)
+            .filter(ScanRun.server_id == server_id)
+            .order_by(ScanRun.started_at.desc())
+            .first()
+        )
+        commit_sha = latest.commit_sha if latest else ""
+        if not commit_sha:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "this git-backed server has no commit to scan yet - create a "
+                    "scan run with an explicit commit_sha first"
+                ),
+            )
+
+    runner_url = os.environ.get("WARDEN_RUNNER_URL")
+    if not runner_url:
+        raise HTTPException(
+            status_code=503,
+            detail="WARDEN_RUNNER_URL is not configured, so no source can be fetched to scan",
+        )
+    headers = {}
+    token = os.environ.get("WARDEN_RUNNER_TOKEN")
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    try:
+        response = httpx.post(
+            f"{runner_url.rstrip('/')}/scan",
+            json={"repo_url": server.repo_url, "commit_sha": commit_sha},
+            headers=headers,
+            timeout=float(os.environ.get("WARDEN_SCAN_TIMEOUT", "900")),
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Warden runner is unreachable: {exc}") from exc
+    if response.is_error:
+        raise HTTPException(status_code=502, detail=f"scan failed: {response.text[-2000:]}")
+    result = response.json()
+
+    run = create_scan_run(db, server_id=server_id, commit_sha=commit_sha)
+    record_rule_analysis_result(
+        db, run.scan_run_id,
+        verdict=RuleVerdict(result["verdict"]),
+        rule_findings=result["findings"],
+        tool_declarations=result["tool_declarations"],
+    )
+    sync_rule_phase_findings(db, run.scan_run_id)
+    # The behavioural LLM leg is a separate analyzer with its own
+    # credentials. Recording a pass here keeps the lifecycle honest about
+    # what ran: this verdict reflects the static rules only.
+    if RuleVerdict(result["verdict"]) is not RuleVerdict.FAIL:
+        record_llm_analysis_result(
+            db, run.scan_run_id, verdict=LlmVerdict.PASS, llm_findings=[],
+        )
+        sync_llm_phase_findings(db, run.scan_run_id)
+    sync_scan_run(db, run.scan_run_id)
+    db.refresh(run)
+
+    counts: dict[str, int] = {}
+    for finding in result["findings"]:
+        counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
+    return {
+        "scan_run_id": run.scan_run_id,
+        "server_id": server_id,
+        "commit_sha": commit_sha,
+        "status": run.status,
+        "verdict": result["verdict"],
+        "analyzer": "warden-builtin",
+        "severity_counts": counts,
+        "findings": result["findings"],
+        "tool_declarations": result["tool_declarations"],
+        "package": result.get("package") or {},
+    }
+
+
+@app.get("/servers/{server_id}/scans")
+def api_list_scans(server_id: str, db: Session = Depends(get_db)):
+    """Scan history for one server, newest first."""
+    runs = (
+        db.query(ScanRun)
+        .filter(ScanRun.server_id == server_id)
+        .order_by(ScanRun.started_at.desc())
+        .limit(25)
+        .all()
+    )
+    out = []
+    for run in runs:
+        findings = run.rule_result.rule_findings if run.rule_result else []
+        counts: dict[str, int] = {}
+        for finding in findings:
+            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+        out.append({
+            "scan_run_id": run.scan_run_id,
+            "commit_sha": run.commit_sha,
+            "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+            "verdict": run.rule_result.verdict.value if run.rule_result else None,
+            "severity_counts": counts,
+            "findings": [
+                {
+                    "rule_id": f.rule_id,
+                    "severity": f.severity,
+                    "message": f.message,
+                    "file": f.file,
+                    "line": f.line,
+                    "analyzer": f.analyzer,
+                }
+                for f in findings
+            ],
+        })
+    return out
 
 
 @app.get("/scan-runs/{scan_run_id}", response_model=ScanRunResponse)

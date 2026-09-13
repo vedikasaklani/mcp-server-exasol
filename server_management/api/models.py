@@ -50,7 +50,9 @@ class ApproveWardenProfileRequest(BaseModel):
 
 class CreateScanRunRequest(BaseModel):
     server_id: str
-    commit_sha: str
+    # Optional for npm sources, where the pinned package version already
+    # identifies the artifact and there is no commit for a caller to supply.
+    commit_sha: str | None = None
 
 
 class ScanRunResponse(BaseModel):

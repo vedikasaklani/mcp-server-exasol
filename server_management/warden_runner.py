@@ -22,6 +22,13 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, SecretStr
 
+from server_management.services.source_scan import (
+    extract_tools,
+    scan_package_metadata,
+    scan_source,
+    verdict_for,
+)
+
 app = FastAPI(title="Warden runner")
 _SHA = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
@@ -128,12 +135,24 @@ class Runner:
                     reused=True,
                 )
             self.stop(request.server_id)
-            source_dir = self._checkout(
-                request.repo_url,
-                request.commit_sha,
-                request.git_token.get_secret_value() if request.git_token else None,
-            )
-            self._install_dependencies(source_dir)
+            if request.repo_url.strip().lower().startswith("npm:"):
+                source_dir = self._install_npm_package(request.repo_url)
+                if not request.args:
+                    detected = self._npm_entrypoint(source_dir, request.repo_url)
+                    if detected is None:
+                        shutil.rmtree(source_dir, ignore_errors=True)
+                        raise RuntimeError(
+                            f"{request.repo_url} declares no bin or main entrypoint; "
+                            "set launch_args explicitly"
+                        )
+                    request = request.model_copy(update={"args": detected})
+            else:
+                source_dir = self._checkout(
+                    request.repo_url,
+                    request.commit_sha,
+                    request.git_token.get_secret_value() if request.git_token else None,
+                )
+                self._install_dependencies(source_dir)
             profile = self._profile_path(request.server_id, request.commit_sha)
             profile.parent.mkdir(parents=True, exist_ok=True)
             self._observe(source_dir, profile, request)
@@ -216,6 +235,70 @@ class Runner:
                 current.process.kill()
                 current.process.wait(timeout=5)
         shutil.rmtree(current.source_dir, ignore_errors=True)
+
+    @staticmethod
+    def _install_npm_package(repo_url: str) -> str:
+        """Materialise an npm-published MCP server into a source directory.
+
+        Installed unconfined on the host for the same reason a git checkout's
+        dependencies are - see sandbox/fetch's package doc. Only the server
+        itself runs confined.
+        """
+        spec = repo_url.strip()[4:]
+        source_dir = tempfile.mkdtemp(prefix="warden-runner-npm-")
+        try:
+            print(
+                "installing npm package (UNCONFINED on this host - see "
+                "sandbox/fetch's package doc for the tradeoff)",
+                flush=True,
+            )
+            _run(
+                ["npm", "install", "--no-audit", "--no-fund", "--prefix", source_dir, spec],
+                timeout=900,
+            )
+            return source_dir
+        except Exception:
+            shutil.rmtree(source_dir, ignore_errors=True)
+            raise
+
+    @staticmethod
+    def _npm_package_name(repo_url: str) -> str:
+        spec = repo_url.strip()[4:]
+        return spec[: spec.rindex("@")] if "@" in spec.lstrip("@") else spec
+
+    @staticmethod
+    def _npm_package_dir(source_dir: str, repo_url: str) -> str | None:
+        path = Path(source_dir) / "node_modules" / Runner._npm_package_name(repo_url)
+        return str(path) if path.is_dir() else None
+
+    @staticmethod
+    def _npm_entrypoint(source_dir: str, repo_url: str) -> list[str] | None:
+        """The package's own declared executable, as a path under source_dir.
+
+        An npm package already states where its entrypoint is, so requiring
+        an operator to rediscover it by reading node_modules is needless -
+        and the obvious guess, `npx <pkg>`, cannot work: gVisor loads the
+        launch executable by parsing its ELF header, and npx is a script.
+        """
+        name = Runner._npm_package_name(repo_url)
+        pkg_json = Path(source_dir) / "node_modules" / name / "package.json"
+        if not pkg_json.is_file():
+            return None
+        try:
+            manifest = json.loads(pkg_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        entry = manifest.get("bin")
+        if isinstance(entry, dict):
+            entry = next(iter(entry.values()), None)
+        if not entry:
+            entry = manifest.get("main")
+        if not isinstance(entry, str) or not entry:
+            return None
+        resolved = (Path("node_modules") / name / entry).as_posix()
+        if not (Path(source_dir) / resolved).is_file():
+            return None
+        return [resolved]
 
     def _checkout(self, repo_url: str, commit_sha: str, git_token: str | None) -> str:
         source_dir = tempfile.mkdtemp(prefix="warden-runner-")
@@ -397,15 +480,32 @@ def _clone_url(repo_url: str) -> str:
     test fixture all need. Full URLs are already unambiguous and pass
     through untouched.
     """
-    base_url = os.environ.get("WARDEN_GIT_BASE_URL", "https://github.com").rstrip("/")
     value = repo_url.strip()
-    if value.startswith("git@github.com:"):
-        return f"{base_url}/{value.split(':', 1)[1]}"
     if value.startswith("http://") or value.startswith("https://"):
-        base = value.removesuffix(".git")
-    else:
-        base = f"{base_url}/{value.removesuffix('.git')}"
-    return base
+        return value.removesuffix(".git")
+    if value.startswith("git@github.com:"):
+        value = value.split(":", 1)[1]
+    path = value.removesuffix(".git")
+    return f"{_git_base_for(path)}/{path}"
+
+
+def _git_base_for(path: str) -> str:
+    """Which host an ``owner/repo`` is cloned from.
+
+    WARDEN_GIT_BASE_OWNERS scopes the override to particular owners, which
+    is what makes a local fixture usable without also cutting the deployment
+    off from real GitHub: an unscoped override silently redirects every
+    repository, so genuine servers fail to clone for a reason that looks
+    like a network fault. Leave it unset for GitHub Enterprise or a full
+    mirror, where redirecting everything is the point.
+    """
+    base_url = os.environ.get("WARDEN_GIT_BASE_URL", "").rstrip("/")
+    if not base_url:
+        return "https://github.com"
+    owners = [o.strip().lower() for o in os.environ.get("WARDEN_GIT_BASE_OWNERS", "").split(",") if o.strip()]
+    if owners and path.split("/", 1)[0].lower() not in owners:
+        return "https://github.com"
+    return base_url
 
 
 def _run(
@@ -440,6 +540,65 @@ def start_session(
         return runner.ensure_session(request)
     except (RuntimeError, OSError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class ScanRequest(BaseModel):
+    repo_url: str = Field(min_length=1)
+    commit_sha: str = Field(default="", max_length=64)
+    git_token: SecretStr | None = Field(default=None, min_length=1)
+
+
+@app.post("/scan")
+def scan_source_endpoint(
+    request: ScanRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Fetch a source and scan it, without starting a session.
+
+    This lives on the runner because the runner is what already knows how
+    to materialise a source - a git checkout at a commit, or an npm package
+    at a version - and duplicating that in the API would be a second place
+    for the two to disagree about what was scanned.
+    """
+    expected = os.environ.get("WARDEN_RUNNER_TOKEN")
+    if expected and authorization != "Bearer " + expected:
+        raise HTTPException(status_code=401, detail="invalid runner credentials")
+    source_dir = None
+    try:
+        if request.repo_url.strip().lower().startswith("npm:"):
+            source_dir = Runner._install_npm_package(request.repo_url)
+            # npm installs into node_modules, which the scanner skips as
+            # third-party code. For an npm source the package *is* the thing
+            # being scanned, so point at it directly - otherwise the scan
+            # sees only the lockfile and reports nothing about the server.
+            scan_root = Runner._npm_package_dir(source_dir, request.repo_url) or source_dir
+            findings = scan_source(scan_root)
+            return {
+                "findings": findings,
+                "tool_declarations": extract_tools(scan_root),
+                "verdict": verdict_for(findings),
+                "package": scan_package_metadata(scan_root),
+            }
+        else:
+            if not _SHA.fullmatch(request.commit_sha):
+                raise ValueError("commit_sha must be a hexadecimal git commit")
+            source_dir = runner._checkout(
+                request.repo_url,
+                request.commit_sha,
+                request.git_token.get_secret_value() if request.git_token else None,
+            )
+        findings = scan_source(source_dir)
+        return {
+            "findings": findings,
+            "tool_declarations": extract_tools(source_dir),
+            "verdict": verdict_for(findings),
+            "package": scan_package_metadata(source_dir),
+        }
+    except (RuntimeError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        if source_dir:
+            shutil.rmtree(source_dir, ignore_errors=True)
 
 
 @app.get("/sessions/{server_id}", response_model=SessionResponse)

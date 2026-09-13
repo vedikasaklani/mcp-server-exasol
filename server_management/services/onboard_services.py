@@ -1,3 +1,4 @@
+import hashlib
 import re
 from datetime import datetime, timezone
 import json
@@ -51,9 +52,57 @@ def mark_interrupted_scans_failed(session: Session) -> int:
     return updated
 
 
+_NPM_NAME = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
+
+
+def normalize_npm_source(value: str) -> str | None:
+    """Canonicalize an ``npm:<package>[@<version>]`` source, or None.
+
+    Most real MCP servers are published to npm rather than built from a
+    checkout, so a registry that only understands git repositories cannot
+    onboard the ecosystem it exists to police. The version stays in the
+    identity because it is what pins the artifact: for a git source the
+    commit does that, and an unpinned npm package would let the code change
+    under an approved capability profile.
+    """
+    if not value.lower().startswith("npm:"):
+        return None
+    spec = value[4:].strip()
+    if not spec:
+        raise ValueError(f"Could not parse npm package: {repr(value)}")
+    scope = ""
+    if spec.startswith("@"):
+        scope, _, rest = spec.partition("/")
+        scope += "/"
+    else:
+        rest = spec
+    name, _, version = rest.partition("@")
+    full = f"{scope}{name}"
+    if not _NPM_NAME.fullmatch(full):
+        raise ValueError(f"Could not parse npm package: {repr(value)}")
+    return f"npm:{full}@{version}" if version else f"npm:{full}"
+
+
+def artifact_ref(repo_url: str) -> str | None:
+    """A commit-shaped identity for a non-git source, or None for git.
+
+    Everything downstream - scan runs, capability profile paths, session
+    keys - is keyed by a hex ref because git was the only source. An npm
+    package is pinned by its version instead, so hash that into the same
+    shape rather than teaching every one of those layers a second identity
+    format.
+    """
+    if not repo_url.strip().lower().startswith("npm:"):
+        return None
+    return hashlib.sha256(repo_url.strip().encode("utf-8")).hexdigest()[:40]
+
+
 def normalize_repo_url(repo_url: str) -> str:
-    """Return a canonical lowercase ``owner/repo`` for GitHub URL variants."""
+    """Return a canonical source id: ``owner/repo`` or ``npm:pkg@version``."""
     value = repo_url.strip()
+    npm = normalize_npm_source(value)
+    if npm is not None:
+        return npm
     if value.startswith("git@github.com:"):
         path = value.removeprefix("git@github.com:")
     elif "://" not in value and len(value.split("/")) == 2:
