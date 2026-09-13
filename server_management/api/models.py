@@ -41,6 +41,7 @@ class UpdateManifestRequest(BaseModel):
     allowed_destinations: list[str] | None = None
     launch_executable: str | None = None
     launch_args: list[str] | None = None
+    env: dict[str, str] | None = None
 
 
 class ApproveWardenProfileRequest(BaseModel):

@@ -102,6 +102,7 @@ class WardenSessionManager:
                 executable=executable,
                 args=list(manifest.launch_args or []),
                 git_token=git_token,
+                env=dict(manifest.env or {}),
             )
             self._record_approval(db, server_id, latest, result["profile_path"])
             address = result["address"]
@@ -177,6 +178,7 @@ class WardenSessionManager:
     def _start_runner_session(
         self, *, server_id: str, repo_url: str, commit_sha: str,
         executable: str, args: list[str], git_token: str | None,
+        env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         runner_url = os.environ.get("WARDEN_RUNNER_URL")
         if not runner_url:
@@ -195,6 +197,7 @@ class WardenSessionManager:
                     "commit_sha": commit_sha,
                     "executable": executable,
                     "args": args,
+                    "env": env or {},
                     "git_token": git_token,
                 },
                 headers=headers,

@@ -65,6 +65,7 @@ class ServerManifest(Base):
     tool_declarations = Column(JSON, nullable=True)                     # NOT set at registration populated by static analysis 
     launch_executable = Column(String, nullable=True)
     launch_args = Column(JSON, nullable=False, default=list)
+    env = Column(JSON, nullable=False, default=dict)                      # extra KEY=VALUE injected into the confined guest
     warden_profile_path = Column(String, nullable=True)
     warden_approved_by = Column(String, nullable=True)
     warden_approved_at = Column(DateTime, nullable=True)

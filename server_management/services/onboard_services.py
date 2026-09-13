@@ -347,6 +347,7 @@ def update_manifest(session: Session, server_id: str, *,
                      tool_declarations: list[dict] | None = None,
                      launch_executable: str | None = None,
                      launch_args: list[str] | None = None,
+                     env: dict[str, str] | None = None,
                      change_reason: str) -> ServerManifest:
     manifest = session.get(ServerManifest, server_id)
     if manifest is None:
@@ -360,6 +361,8 @@ def update_manifest(session: Session, server_id: str, *,
         manifest.launch_executable = launch_executable.strip() or None
     if launch_args is not None:
         manifest.launch_args = launch_args
+    if env is not None:
+        manifest.env = env
     if launch_executable is not None or launch_args is not None:
         manifest.warden_profile_path = None
         manifest.warden_approved_by = None

@@ -256,6 +256,15 @@ Apply the migration before registering or updating launch specifications:
 alembic upgrade head
 ```
 
+A `launch_executable` intended for the automated runner must be a real binary
+on the runner's native Linux filesystem (see the session section above) and
+must start an MCP server in **stdio** transport. The warden bridge drives
+JSON-RPC over the process's standard input for the warm-up handshake and every
+live call; a server launched in `streamable-http` or SSE mode never reads
+stdin, so it always times out during warm-up regardless of how fast or native
+the environment is. Serve such servers through a stdio-capable entry point
+when warden owns them.
+
 To make runtime and static Exasol facts use the same repository identity,
 start Warden with the registered canonical repository source:
 
@@ -298,13 +307,51 @@ export WARDEN_APPROVER=vedika
 /opt/mcp-warden/venv/bin/uvicorn server_management.warden_runner:app --host 0.0.0.0 --port 8100
 ```
 
+Optional runner timeouts, all in seconds unless noted:
+
+- `WARDEN_OBSERVE_TIMEOUT` (default `300`): wall-clock limit for one
+  `warden-observe` run.
+- `WARDEN_REQUEST_TIMEOUT`: forwarded to `warden-serve` as
+  `-request-timeout`, the per-request/response budget for the warm-up
+  handshake and for each live call.
+- `WARDEN_INSTALL_TIMEOUT` (default `300`): limit for installing the
+  checked-out server's own dependencies.
+
 The runner fetches by repository identity and performs an explicit detached
-checkout of the requested SHA. For private repositories, the API forwards the
-short-lived GitHub App installation token obtained for the scan; no static
-`WARDEN_GIT_TOKEN` is required. The API never needs the runner's source tree,
-profile file, `runsc`, or Warden binaries. `WARDEN_SOURCE_ROOT` is no longer
-part of the automated flow. The existing profile-upload endpoint remains a
-manual fallback, not a prerequisite for normal registration.
+checkout of the requested SHA. After checkout it installs the server's own
+declared dependencies (a root `package.json` or root `requirements.txt`) so a
+plain `node index.js` or `python3 -m ...` launch can actually start. That
+install runs **unconfined on the runner host**, with this host's full
+privileges, and only the detected server process is sandboxed; this is the
+same tradeoff `Exasol/sandbox/fetch` documents, and it means repository
+credentials or host secrets must never be reachable from a server whose
+install step you do not trust. Servers that do not vendor or declare their
+dependencies in one of those two files must resolve them through
+`launch_executable` itself (a real interpreter binary, not an `npx`/`npm exec`
+wrapper).
+
+Before profiling, the runner also checks that the launch executable is on a
+native Linux filesystem. A `launch_executable` on a WSL2 Windows-drive mount
+(`/mnt/c/...`) or any other slow network/virtio filesystem makes gVisor's
+per-syscall interception too slow for the container to start inside the warm-up
+window, which shows up as `warmup:initialize timed out after 30s`; the runner
+fails fast with that exact explanation. Keep the project (and any venv the
+launch executable points at) on a native path such as `~/mcp-server-exasol`.
+
+For private repositories, the API forwards the short-lived GitHub App
+installation token obtained for the scan; no static `WARDEN_GIT_TOKEN` is
+required. The API never needs the runner's source tree, profile file, `runsc`,
+or Warden binaries. `WARDEN_SOURCE_ROOT` is no longer part of the automated
+flow. The existing profile-upload endpoint remains a manual fallback, not a
+prerequisite for normal registration.
+
+The runner launches `warden-serve` with `WARDEN_SERVER_SOURCE` and
+`WARDEN_SERVER_ID` set as **host-side process environment**, not as `-env`
+injections. `warden-serve` reads those before confinement to resolve the
+server's telemetry identity, so runtime events land under the same server id
+the API uses for registration, manifests, and dashboard queries. `-env` only
+injects variables into the confined guest and is invisible to `warden-serve`
+itself.
 
 
 ## Local setup
@@ -411,6 +458,27 @@ calculation to work correctly.
 
 
 ## Troubleshooting
+
+### Warm pool fails with `warmup:initialize timed out after 30s`
+
+The confined container never answered the MCP `initialize` handshake inside
+the warm-up window. Check in this order:
+
+1. **Slow filesystem.** The launch executable (or its venv/interpreter) is on
+   a WSL2 Windows-drive mount, `/mnt/c/...`, CIFS, NFS, or FUSE. The runner's
+   preflight rejects that before profiling; if you are seeing the raw timeout
+   anyway (manual `warden-serve`, or an older runner), move the project and
+   its venv to a native Linux path, e.g. `~/mcp-server-exasol`, recreate the
+   venv there, and register that path as `launch_executable`.
+2. **Transport mismatch.** The server was launched in `streamable-http`/SSE
+   mode and never reads stdin, so the handshake request is never consumed.
+   Warden drives MCP over stdio; launch a stdio-capable entry point.
+3. **Startup work or blocked I/O.** A server that performs slow network work,
+   lazy JIT/compile steps, or a blocking connect during startup can consume
+   the whole window. Increase `WARDEN_REQUEST_TIMEOUT` and observe the
+   container's trace; a stderr of a consistent import crash instead of a
+   timeout usually means a missing dependency or an unmet required
+   environment variable at import time.
 
 ### `Connection refused` to Exasol
 

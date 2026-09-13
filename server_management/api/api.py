@@ -249,11 +249,12 @@ def api_update_manifest(
             allowed_destinations=req.allowed_destinations,
             launch_executable=req.launch_executable,
             launch_args=req.launch_args,
+            env=req.env,
             change_reason="operator_edit",
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="server not found")
-    if req.launch_executable is not None or req.launch_args is not None:
+    if req.launch_executable is not None or req.launch_args is not None or req.env is not None:
         background_tasks.add_task(warden_sessions.stop_server, server_id)
     background_tasks.add_task(sync_latest_manifest_history, db, server_id)
     return _manifest_response(manifest)
