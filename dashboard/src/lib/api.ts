@@ -19,7 +19,11 @@ export class ApiError extends Error {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "1", // free-tier ngrok interstitial
+      ...(init?.headers || {}),
+    },
     cache: "no-store",
   });
   if (!res.ok) {
