@@ -132,6 +132,7 @@ class Runner:
                 request.commit_sha,
                 request.git_token.get_secret_value() if request.git_token else None,
             )
+            self._install_dependencies(source_dir)
             profile = self._profile_path(request.server_id, request.commit_sha)
             profile.parent.mkdir(parents=True, exist_ok=True)
             self._observe(source_dir, profile, request)
@@ -203,6 +204,63 @@ class Runner:
                     os.unlink(askpass.name)
                 except FileNotFoundError:
                     pass
+
+    @staticmethod
+    def _has_npm_script(source_dir: str, name: str) -> bool:
+        try:
+            with open(os.path.join(source_dir, "package.json"), encoding="utf-8") as f:
+                return bool(json.load(f).get("scripts", {}).get(name))
+        except (OSError, json.JSONDecodeError):
+            return False
+
+    def _install_dependencies(self, source_dir: str) -> None:
+        """Install the checked-out server's own declared dependencies
+        before profiling or serving it - unconfined on this host, same
+        tradeoff cmd/warden-launch's sandbox/fetch package documents and
+        warns about for exactly this reason (the install itself runs with
+        this host's full privileges; only the detected server process is
+        ever sandboxed). Without this, the overwhelming majority of real
+        npm- or pip-based MCP servers on GitHub can never even start:
+        nothing else in this pipeline runs `npm install`/`pip install`, so
+        a plain `node index.js` immediately fails on a missing
+        node_modules. Best-effort in scope: only the two common,
+        unambiguous cases are handled here (a package.json or a
+        requirements.txt at the repo root); anything else needs its
+        dependencies vendored into the repo or a launch_executable that
+        resolves them itself (a real ELF interpreter such as `node` or
+        `python3` with the source file as an argument - NOT a wrapper
+        script like `npx`/`npm exec`, which gVisor's confinement layer
+        cannot introspect the same way it does a real binary, and which
+        needs live network access to a package registry that a confined,
+        default-deny network policy will not grant anyway).
+        """
+        install_timeout = int(os.environ.get("WARDEN_INSTALL_TIMEOUT", "300"))
+        if os.path.exists(os.path.join(source_dir, "package.json")):
+            print(
+                "installing npm dependencies (UNCONFINED on this host - "
+                "see sandbox/fetch's package doc for the tradeoff)",
+                flush=True,
+            )
+            cmd = (
+                ["npm", "ci"]
+                if os.path.exists(os.path.join(source_dir, "package-lock.json"))
+                else ["npm", "install"]
+            )
+            _run(cmd, cwd=source_dir, timeout=install_timeout)
+            if self._has_npm_script(source_dir, "build"):
+                print("running npm run build (most TypeScript MCP servers need this)", flush=True)
+                _run(["npm", "run", "build"], cwd=source_dir, timeout=install_timeout)
+        if os.path.exists(os.path.join(source_dir, "requirements.txt")):
+            print(
+                "installing pip dependencies (UNCONFINED on this host - "
+                "see sandbox/fetch's package doc for the tradeoff)",
+                flush=True,
+            )
+            _run(
+                ["python3", "-m", "pip", "install", "--user", "--break-system-packages",
+                 "-r", "requirements.txt"],
+                cwd=source_dir, timeout=install_timeout,
+            )
 
     def _observe(self, source_dir: str, profile: Path, request: SessionRequest) -> None:
         observe = os.environ.get("WARDEN_OBSERVE_BIN")

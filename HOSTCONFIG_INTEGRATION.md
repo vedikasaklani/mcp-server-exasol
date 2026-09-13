@@ -216,10 +216,47 @@ fixes across rather than re-discovering them:
     declared. Fixed: `OnWarmupResponse` now parses the tools/list payload
     and posts it once (`sync.Once`) per session.
 
-None of the first seven were Go-side issues; #9-11 are, and are the ones
-that actually make real-time execution and discovery show up correctly on
-a dashboard for a server run the production way. All confirmed by an
-actual end-to-end run (see §6) — not by code review alone.
+12. **`warden_runner.py` never installed a checked-out server's own
+    dependencies.** Nothing in the pipeline ran `npm install` or
+    `pip install` before profiling/serving — a plain `node index.js`
+    against a freshly-cloned repo immediately failed on a missing
+    `node_modules`. This meant the overwhelming majority of real npm- or
+    pip-based MCP servers on GitHub could never run through the production
+    path at all, only dependency-free ones. Fixed: `ensure_session` now
+    runs `npm ci`/`npm install` (plus `npm run build` if the package
+    declares one — most TypeScript MCP servers need this) when a
+    `package.json` exists at the repo root, and `pip install -r
+    requirements.txt` when a `requirements.txt` does. Same tradeoff
+    `cmd/warden-launch`'s `sandbox/fetch` package already documents for its
+    own equivalent step: this install runs **unconfined** on the host;
+    only the detected server process itself is ever sandboxed.
+
+None of the first seven were Go-side issues; #9-11 are, and #12 is Python.
+These are the ones that actually make real-time execution and discovery
+show up correctly on a dashboard for a server run the production way, and
+that let the production path run something more than a toy script. All
+confirmed by an actual end-to-end run (see §6/§7) — not by code review
+alone, including a real npm package (`uuid`) genuinely being installed and
+used by a live tool call.
+
+### A hard limit worth knowing: entrypoints that are scripts, not binaries
+
+`launch_executable` must be a real ELF binary — `node`, `python3`, a
+compiled Go/Rust server — with the actual entry file as an **argument**
+(`launch_args: ["server.js"]`), never a wrapper script as the executable
+itself (`npx`, `npm exec`, `pip-run`, a shell script). Confirmed by
+reproducing it: pointing `launch_executable` at `npx` fails container
+creation outright (`failed to load /.mcp-warden/probe: no such file or
+directory`) because gVisor's confinement layer introspects the entrypoint
+as an ELF binary to figure out what to mount (`sandbox/observe/profilegen.go`'s
+`elfInterpreter()` uses Go's `debug/elf` package, which errors on anything
+that isn't one) — a shebang script silently gets no interpreter mount at
+all. Even if that were fixed, a script like `npx` needs live network
+access to a package registry at *runtime*, which a confined, default-deny
+network policy will not grant anyway. This is why bug #12's fix installs
+dependencies **before** confinement starts, rather than trying to let the
+entrypoint fetch its own dependencies live inside the sandbox — that
+was never going to work, by design (§4.2/§6.1 of `docs/ARCHITECTURE.md`).
 
 ## 3. Known issues, not fixed (flagging for you)
 
@@ -247,6 +284,17 @@ actual end-to-end run (see §6) — not by code review alone.
   do first-time schema setup (the self-seeding in `_connect()` now covers
   the same need automatically, so the doc's `init` step can likely just be
   deleted rather than reimplemented).
+- **Monorepo GitHub repos aren't handled.** Bug #12's dependency install
+  only looks at the *repo root* for `package.json`/`requirements.txt`. A
+  repo like `modelcontextprotocol/servers` (many servers, one per
+  subdirectory, no root-level manifest) will clone fine but has nothing
+  for the installer to find — `launch_executable`/`launch_args` need to
+  point at a subdirectory that's *already buildable as-is*, or you point
+  `launch_args` at a path inside a subdirectory that already has its
+  `node_modules`/`dist` committed. Extending the installer to `cd` into a
+  declared subdirectory first would be a small, natural follow-up if this
+  matters to you — see §6's example list below for repos that don't have
+  this problem.
 
 ## 4. If your Exasol instance predates this schema
 
@@ -455,6 +503,81 @@ What "working" looks like:
   why "the call succeeded, the attack didn't" is the expected shape).
 - `curl .../servers` afterward shows both servers with clearly separated
   scores (malicious near 30, legitimate near 90+).
+
+### Example GitHub MCP servers to register and run
+
+Real-world repos are hit or miss against the production pipeline right
+now, for reasons that are all documented in §3/§2 above rather than
+mysterious - here's what actually works and what doesn't, checked, not
+guessed:
+
+- **Fastest, zero-setup option: skip GitHub entirely.** `warden-console`'s
+  curated aliases (`load everything`, `load memory`, `load thinking`) pull
+  straight from the npm registry via `sandbox/fetch`, which already
+  handles install/build correctly and isn't affected by any of this.
+  Verified working. `load filesystem` is the one known exception (§3).
+- **To test the real production pipeline (register → scan → run → call),
+  use a repo shaped like the one this was battle-tested with: a single
+  script plus a root-level `package.json`/`requirements.txt`, nothing
+  nested.** That shape is guaranteed to work end to end - checked out,
+  dependencies installed, served, called live, all under one `server_id`.
+  The fastest way to get one: push these two files to a new throwaway
+  GitHub repo of your own and register that repo's URL.
+
+  `package.json`:
+  ```json
+  { "name": "demo-mcp-server", "version": "1.0.0", "dependencies": { "uuid": "^9.0.0" } }
+  ```
+
+  `server.js` (a minimal MCP stdio server using a real npm dependency):
+  ```js
+  #!/usr/bin/env node
+  const { v4: uuidv4 } = require('uuid');
+  let buf = '';
+  process.stdin.on('data', (chunk) => {
+    buf += chunk;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      let msg; try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.method === 'initialize') {
+        respond(msg.id, { protocolVersion: '2025-06-18', capabilities: { tools: {} },
+          serverInfo: { name: 'demo-mcp-server', version: '1.0.0' } });
+      } else if (msg.method === 'tools/list') {
+        respond(msg.id, { tools: [{ name: 'new_id', description: 'Generate a UUID',
+          inputSchema: { type: 'object', properties: {} } }] });
+      } else if (msg.method === 'tools/call' && msg.params.name === 'new_id') {
+        respond(msg.id, { content: [{ type: 'text', text: uuidv4() }] });
+      } else if (msg.id !== undefined) {
+        respond(msg.id, {});
+      }
+    }
+  });
+  function respond(id, result) {
+    const key = result.error ? 'error' : 'result';
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, [key]: result[key] || result }) + '\n');
+  }
+  ```
+
+  Register with `repo_url` pointing at that GitHub repo, `launch_executable:
+  "node"`, `launch_args: ["server.js"]`. This exact shape (mine, not a copy
+  of theirs) is what proved bug #12's npm-dependency install and the whole
+  real-time `/call` path.
+
+- **`GLips/Figma-Context-MCP`** — a real, standalone (non-monorepo) TypeScript
+  MCP server with a root-level `package.json` and a `build` script
+  (`tsup`), which is the shape bug #12's fix targets. Not run end-to-end
+  here (needs a `FIGMA_API_KEY` to do anything meaningful, and uses `pnpm`,
+  which `npm install` can usually but not always substitute for). Good
+  next real-world test once the basics above are confirmed working in your
+  environment.
+- **`modelcontextprotocol/servers`** and **`modelcontextprotocol/quickstart-resources`**
+  are real and clone fine, but both are monorepos (one server per
+  subdirectory, no root-level manifest) — hits the limitation noted in
+  §3. Either point `launch_args` at a subdirectory that already has its
+  build output committed, or extend `_install_dependencies` to `cd` into a
+  declared subdirectory first.
 
 ### Testing the production path (`warden_runner.py` + real-time `/call`)
 
