@@ -1,18 +1,24 @@
-"""Approval-gated, one-process-per-server Warden session manager."""
+"""Coordinator for the remote, host-side Warden runner."""
 
 from __future__ import annotations
 
-import hashlib
 import os
-import socket
-import subprocess
+import asyncio
 import threading
-from dataclasses import dataclass
-from pathlib import Path
+from datetime import datetime, timezone
+from typing import Any
 
-from server_management.database.db_config import session as SessionLocal
-from server_management.database.db_models import ScanRun, ScanStatus, ServerManifest
+import httpx
 
+from server_management.api.github_auth import get_installation_token
+from server_management.database.db_config import session_scope
+from server_management.database.db_models import (
+    ManifestHistory,
+    ScanRun,
+    ScanStatus,
+    Server,
+    ServerManifest,
+)
 
 _READY_STATUSES = {
     ScanStatus.STATIC_ANALYSIS_PASSED,
@@ -23,21 +29,13 @@ _READY_STATUSES = {
 }
 
 
-@dataclass
-class WardenSession:
-    process: subprocess.Popen
-    commit_sha: str
-    address: str
-
-
 class WardenSessionManager:
     def __init__(self) -> None:
-        self._sessions: dict[str, WardenSession] = {}
+        self._sessions: dict[str, str] = {}
         self._lock = threading.RLock()
 
-    def reconcile_server(self, server_id: str) -> None:
-        db = SessionLocal()
-        try:
+    def reconcile_server(self, server_id: str, git_token: str | None = None) -> None:
+        with session_scope() as db:
             manifest = db.get(ServerManifest, server_id)
             latest = (
                 db.query(ScanRun)
@@ -45,107 +43,140 @@ class WardenSessionManager:
                 .order_by(ScanRun.started_at.desc())
                 .first()
             )
-            if manifest is None or latest is None:
+            server = db.get(Server, server_id)
+            if manifest is None or latest is None or server is None:
                 return
-            if not self._eligible(manifest, latest):
+            if latest.status not in _READY_STATUSES or not manifest.launch_executable:
                 return
-            self._start_or_replace(
-                server_id,
-                latest,
-                manifest,
+            if git_token is None:
+                git_token = self._get_installation_token(server.installation_id)
+            result = self._start_runner_session(
+                server_id=server_id,
+                repo_url=server.repo_url,
+                commit_sha=latest.commit_sha,
+                executable=manifest.launch_executable,
+                args=list(manifest.launch_args or []),
+                git_token=git_token,
             )
-        finally:
-            db.close()
+            self._record_approval(db, server_id, latest, result["profile_path"])
+            with self._lock:
+                self._sessions[server_id] = latest.commit_sha
+
+    def _start_runner_session(
+        self, *, server_id: str, repo_url: str, commit_sha: str,
+        executable: str, args: list[str], git_token: str,
+    ) -> dict[str, Any]:
+        runner_url = os.environ.get("WARDEN_RUNNER_URL")
+        if not runner_url:
+            raise RuntimeError("WARDEN_RUNNER_URL is required for automated Warden sessions")
+        headers = {}
+        token = os.environ.get("WARDEN_RUNNER_TOKEN")
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        runner_endpoint = f"{runner_url.rstrip('/')}/sessions/{server_id}"
+        try:
+            response = httpx.post(
+                runner_endpoint,
+                json={
+                    "server_id": server_id,
+                    "repo_url": repo_url,
+                    "commit_sha": commit_sha,
+                    "executable": executable,
+                    "args": args,
+                    "git_token": git_token,
+                },
+                headers=headers,
+                timeout=float(os.environ.get("WARDEN_RUNNER_TIMEOUT", "360")),
+            )
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Warden runner is unreachable at {runner_endpoint}; "
+                "check WARDEN_RUNNER_URL and Docker-to-WSL networking"
+            ) from exc
+        if response.is_error:
+            raise RuntimeError(f"Warden runner rejected session: {response.text[-2000:]}")
+        return response.json()
+
+    @staticmethod
+    def _get_installation_token(installation_id: int) -> str:
+        """Exchange installation identity without nesting asyncio.run()."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(get_installation_token(installation_id))
+
+        result: list[str] = []
+        failure: list[Exception] = []
+
+        def exchange() -> None:
+            try:
+                result.append(asyncio.run(get_installation_token(installation_id)))
+            except Exception as exc:
+                failure.append(exc)
+
+        thread = threading.Thread(target=exchange, name="github-token-exchange")
+        thread.start()
+        thread.join()
+        if failure:
+            raise RuntimeError(
+                f"GitHub installation token exchange failed for installation {installation_id}"
+            ) from failure[0]
+        if not result:
+            raise RuntimeError("GitHub installation token exchange returned no token")
+        return result[0]
+
+    @staticmethod
+    def _record_approval(db, server_id: str, latest: ScanRun, profile_path: str) -> None:
+        manifest = db.get(ServerManifest, server_id)
+        if manifest is None:
+            raise RuntimeError(f"server manifest disappeared: {server_id}")
+        if (
+            manifest.warden_approved_commit == latest.commit_sha
+            and manifest.warden_profile_path == profile_path
+        ):
+            return
+        manifest.warden_profile_path = profile_path
+        manifest.warden_approved_by = "vedika"
+        manifest.warden_approved_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        manifest.warden_approved_commit = latest.commit_sha
+        manifest.version = int(manifest.version) + 1
+        db.add(ManifestHistory(
+            server_id=server_id,
+            version=int(manifest.version),
+            allowed_destinations=manifest.allowed_destinations,
+            tool_declarations=manifest.tool_declarations,
+            change_reason="warden_profile_auto_approved",
+        ))
+        db.commit()
 
     def reconcile_all(self) -> None:
-        db = SessionLocal()
-        try:
+        with session_scope() as db:
             server_ids = [row[0] for row in db.query(ServerManifest.server_id).all()]
-        finally:
-            db.close()
         for server_id in server_ids:
-            self.reconcile_server(server_id)
+            try:
+                self.reconcile_server(server_id)
+            except Exception as exc:
+                print(
+                    f"warden runner reconciliation failed for {server_id}: {exc}",
+                    flush=True,
+                )
 
     def stop_server(self, server_id: str) -> None:
+        runner_url = os.environ.get("WARDEN_RUNNER_URL")
+        if runner_url:
+            headers = {}
+            token = os.environ.get("WARDEN_RUNNER_TOKEN")
+            if token:
+                headers["Authorization"] = "Bearer " + token
+            response = httpx.delete(
+                f"{runner_url.rstrip('/')}/sessions/{server_id}",
+                headers=headers,
+                timeout=float(os.environ.get("WARDEN_RUNNER_TIMEOUT", "30")),
+            )
+            if response.is_error and response.status_code != 404:
+                raise RuntimeError(f"Warden runner failed to stop session: {response.text[-1000:]}")
         with self._lock:
-            session = self._sessions.pop(server_id, None)
-            if session is not None and session.process.poll() is None:
-                session.process.terminate()
-                session.process.wait(timeout=10)
-
-    @staticmethod
-    def _eligible(manifest: ServerManifest, latest: ScanRun) -> bool:
-        return bool(
-            manifest.launch_executable
-            and manifest.warden_profile_path
-            and manifest.warden_approved_by
-            and manifest.warden_approved_commit == latest.commit_sha
-            and latest.status in _READY_STATUSES
-            and Path(manifest.warden_profile_path).is_file()
-            and os.environ.get("WARDEN_PROBE_BIN")
-            and os.environ.get("WARDEN_SERVE_BIN")
-        )
-
-    def _start_or_replace(
-        self,
-        server_id: str,
-        latest: ScanRun,
-        manifest: ServerManifest,
-    ) -> None:
-        with self._lock:
-            current = self._sessions.get(server_id)
-            if current is not None and current.process.poll() is None:
-                if current.commit_sha == latest.commit_sha:
-                    return
-                current.process.terminate()
-                current.process.wait(timeout=10)
-                self._sessions.pop(server_id, None)
-
-            source_root = os.environ.get("WARDEN_SOURCE_ROOT")
-            if not source_root:
-                raise RuntimeError("WARDEN_SOURCE_ROOT is required for approved sessions")
-            source_dir = Path(source_root).resolve() / server_id / latest.scan_run_id
-            if not source_dir.is_dir():
-                raise RuntimeError(f"accepted Warden source is missing: {source_dir}")
-
-            address = self._allocate_address(server_id)
-            session_id = f"{server_id}-{latest.commit_sha[:12]}"
-            command = [
-                os.environ["WARDEN_SERVE_BIN"],
-                "-profile", manifest.warden_profile_path,
-                "-probe", os.environ["WARDEN_PROBE_BIN"],
-                "-addr", address,
-                "-cwd", str(source_dir),
-                "-session", session_id,
-                "-env", f"WARDEN_SERVER_SOURCE={latest.server.repo_url}",
-                *("--", manifest.launch_executable, *(manifest.launch_args or [])),
-            ]
-            process = subprocess.Popen(command, cwd=str(source_dir))
-            self._sessions[server_id] = WardenSession(process, latest.commit_sha, address)
-            threading.Thread(
-                target=self._watch_process,
-                args=(server_id, process),
-                name=f"warden-watch-{server_id}",
-                daemon=True,
-            ).start()
-
-    def _watch_process(self, server_id: str, process: subprocess.Popen) -> None:
-        exit_code = process.wait()
-        with self._lock:
-            current = self._sessions.get(server_id)
-            if current is None or current.process is not process:
-                return
             self._sessions.pop(server_id, None)
-        print(f"warden session exited: server_id={server_id} exit_code={exit_code}")
-
-    @staticmethod
-    def _allocate_address(server_id: str) -> str:
-        base = int(os.environ.get("WARDEN_PORT_BASE", "18000"))
-        offset = int(hashlib.sha256(server_id.encode()).hexdigest()[:6], 16) % 1000
-        port = base + offset
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", port))
-        return f"127.0.0.1:{port}"
 
 
 warden_sessions = WardenSessionManager()

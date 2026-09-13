@@ -48,7 +48,7 @@ failed scan.
   - `RuleAnalysisResult`, `RuleFinding`, and `ToolDeclaration` store Phase 1
     output.
   - `LlmAnalysisResult` and `ToolBehavioralFinding` store Phase 2 output.
-  - `ScanStatus`, `RuleVerdict`, `LlmVerdict`, and `Severity` define the
+  - `ScanStatus`, `RuleVerdict`, and `LlmVerdict` define the
     allowed workflow values.
 
 ### `server_management/services`
@@ -267,50 +267,44 @@ The static sync path resolves that same source with `kind=github`. Do not use
 the arbitrary executable string as the Warden source when validating the
 identity join.
 
-### Approval-gated long-lived Warden sessions
+### Automated long-lived Warden sessions
 
-The Python service owns one `warden-serve` process per registered server. It
-reconciles after registration, after a scan reaches `STATIC_ANALYSIS_PASSED`,
-and after profile approval. Registration by itself never launches a process.
-The manager requires all of the following:
+The API is only the coordinator. After a scan reaches an eligible status, it
+sends the registered repository, exact scan commit, and structured launch
+specification to a separate Ubuntu/WSL Warden runner. The runner clones the
+repository, checks out that commit, runs `warden-observe`, records the profile
+as approved by `vedika` for now, and keeps one `warden-serve` subprocess per
+server. It replaces that subprocess when the approved commit changes.
 
-- a non-empty manifest launch executable and arguments;
-- a scan at an eligible status with an accepted source tree under
-  `WARDEN_SOURCE_ROOT/<postgres-server-id>/<scan-run-id>`;
-- a profile file explicitly approved for that scan's commit;
-- `WARDEN_SERVE_BIN` and `WARDEN_PROBE_BIN` configured on the API host.
-
-Configure the API host (the host with `runsc` and the Warden binaries):
+Configure the API container with the runner URL:
 
 ```bash
-export WARDEN_SOURCE_ROOT=/var/lib/mcp-warden/source
+export WARDEN_RUNNER_URL=http://host.docker.internal:8100
+export WARDEN_RUNNER_TOKEN=change-me
+```
+
+On Ubuntu/WSL, start the runner on the host that has `runsc`, Warden, and git:
+
+```bash
+python3 -m venv /opt/mcp-warden/venv
+/opt/mcp-warden/venv/bin/pip install -r warden-runner-requirements.txt
+export WARDEN_RUNNER_TOKEN=change-me
+export WARDEN_OBSERVE_BIN=/opt/mcp-warden/warden-observe
 export WARDEN_SERVE_BIN=/opt/mcp-warden/warden-serve
 export WARDEN_PROBE_BIN=/opt/mcp-warden/probe
-export WARDEN_PORT_BASE=18000
+export WARDEN_PROFILE_ROOT=/var/lib/mcp-warden/profiles
+export WARDEN_TELEMETRY_API=http://127.0.0.1:8000
+export WARDEN_APPROVER=vedika
+/opt/mcp-warden/venv/bin/uvicorn server_management.warden_runner:app --host 0.0.0.0 --port 8100
 ```
 
-After the learning run produces a candidate profile and a human reviews it,
-record the approval for the exact commit:
-
-```bash
-curl -X POST http://127.0.0.1:8000/servers/<server-id>/warden/approve \
-  -H 'Content-Type: application/json' \
-  -d '{"profile_path":"/var/lib/mcp-warden/profiles/<server-id>.json",
-       "approved_by":"alice@example.com",
-       "commit_sha":"<scanned-commit>"}'
-```
-
-The response and the frontend server overview expose the approver, timestamp,
-and approved commit. A later commit does not automatically reuse the old
-approval: the old session may continue serving, but the new artifact is not
-started until its profile is approved. Editing the launch specification clears
-approval and stops the existing session.
-
-The scan pipeline deletes its temporary clone as before. To retain a
-successful Phase 1 tree for a later `warden load path:` run, set
-`WARDEN_SOURCE_ROOT` to a dedicated directory. The copy is made only after a
-non-rejected static verdict and excludes `.git` so clone credentials cannot be
-carried into the warden tree.
+The runner fetches by repository identity and performs an explicit detached
+checkout of the requested SHA. For private repositories, the API forwards the
+short-lived GitHub App installation token obtained for the scan; no static
+`WARDEN_GIT_TOKEN` is required. The API never needs the runner's source tree,
+profile file, `runsc`, or Warden binaries. `WARDEN_SOURCE_ROOT` is no longer
+part of the automated flow. The existing profile-upload endpoint remains a
+manual fallback, not a prerequisite for normal registration.
 
 
 ## Local setup

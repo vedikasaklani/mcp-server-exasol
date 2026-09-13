@@ -105,23 +105,57 @@ def resolve_server(
             connection.close()
 
 
-def _tool_key(exa: pyexasol.ExaConnection, server_id: str, name: str) -> int:
+def ensure_tool_key(
+    exa: pyexasol.ExaConnection,
+    server_id: str,
+    name: str,
+    first_seen_scan_run_id: str | None = None,
+) -> int:
+    """Get-or-create a DIM_TOOL key scoped to (server_id, name)."""
     key = exa.execute(
         "SELECT TOOL_KEY FROM DIM_TOOL WHERE SERVER_ID = {server_id} AND TOOL_NAME = {name}",
         {"server_id": server_id, "name": name},
     ).fetchval()
     if key is not None:
         return int(key)
-    exa.execute(
-        "INSERT INTO DIM_TOOL (SERVER_ID, TOOL_NAME) VALUES ({server_id}, {name})",
-        {"server_id": server_id, "name": name},
-    )
+    if first_seen_scan_run_id:
+        exa.execute(
+            "INSERT INTO DIM_TOOL (SERVER_ID, TOOL_NAME, FIRST_SEEN_SCAN_RUN_ID) "
+            "VALUES ({server_id}, {name}, {first_seen})",
+            {"server_id": server_id, "name": name, "first_seen": first_seen_scan_run_id},
+        )
+    else:
+        exa.execute(
+            "INSERT INTO DIM_TOOL (SERVER_ID, TOOL_NAME) VALUES ({server_id}, {name})",
+            {"server_id": server_id, "name": name},
+        )
     inserted_key = exa.execute(
         "SELECT TOOL_KEY FROM DIM_TOOL WHERE SERVER_ID = {server_id} AND TOOL_NAME = {name}",
         {"server_id": server_id, "name": name},
     ).fetchval()
     if inserted_key is None:
         raise RuntimeError(f"could not create tool dimension for {server_id}/{name}")
+    return int(inserted_key)
+
+
+def ensure_analyzer_key(exa: pyexasol.ExaConnection, name: str) -> int:
+    """Get-or-create a DIM_ANALYZER key for the given analyzer name."""
+    key = exa.execute(
+        "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {name}",
+        {"name": name},
+    ).fetchval()
+    if key is not None:
+        return int(key)
+    exa.execute(
+        "INSERT INTO DIM_ANALYZER (ANALYZER_NAME) VALUES ({name})",
+        {"name": name},
+    )
+    inserted_key = exa.execute(
+        "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {name}",
+        {"name": name},
+    ).fetchval()
+    if inserted_key is None:
+        raise RuntimeError(f"could not create analyzer dimension {name}")
     return int(inserted_key)
 
 
@@ -140,7 +174,7 @@ def write_runtime_events(server_id: str, events: list[dict[str, Any]]) -> int:
             event_id = str(event["event_id"])
             event_ts = _parse_timestamp(event.get("event_ts"))
             tool_name = str(event.get("tool_name") or "")
-            tool_key = _tool_key(exa, server_id, tool_name) if tool_name else None
+            tool_key = ensure_tool_key(exa, server_id, tool_name) if tool_name else None
             categories = json.dumps(event.get("sensitive_data_categories") or [])
             exa.execute(
                 """
@@ -288,7 +322,7 @@ def write_tools(server_id: str, tools: list[dict[str, Any]]) -> int:
             name = str(tool.get("name") or "").strip()
             if not name:
                 raise ValueError("tool name must not be empty")
-            _tool_key(exa, server_id, name)
+            ensure_tool_key(exa, server_id, name)
         return len(tools)
     finally:
         exa.close()
@@ -310,7 +344,7 @@ def write_sast_findings(
         for tool in tools:
             name = str(tool.get("name") or "").strip()
             if name:
-                _tool_key(exa, server_id, name)
+                ensure_tool_key(exa, server_id, name)
         scan_run_id = f"proxy-{ref}"[:36] or "proxy-scan"
         for finding in findings:
             payload = json.dumps(finding, sort_keys=True)
@@ -318,21 +352,7 @@ def write_sast_findings(
                 hashlib.sha256(payload.encode("utf-8")).digest()[:8], "big"
             ) % 10**18
             analyzer_name = str(finding.get("analyzer") or "semgrep")
-            analyzer_key = exa.execute(
-                "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {name}",
-                {"name": analyzer_name},
-            ).fetchval()
-            if analyzer_key is None:
-                exa.execute(
-                    "INSERT INTO DIM_ANALYZER (ANALYZER_NAME) VALUES ({name})",
-                    {"name": analyzer_name},
-                )
-                analyzer_key = exa.execute(
-                    "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {name}",
-                    {"name": analyzer_name},
-                ).fetchval()
-            if analyzer_key is None:
-                raise RuntimeError(f"could not create analyzer dimension {analyzer_name}")
+            analyzer_key = ensure_analyzer_key(exa, analyzer_name)
             event_ts = datetime.now(timezone.utc).replace(tzinfo=None)
             exa.execute(
                 """
@@ -430,7 +450,7 @@ def write_runtime_findings(server_id: str, findings: list[dict[str, Any]]) -> in
             detector = str(finding.get("detector") or "unknown")
             finding_id = f"{finding.get('session_id', '')}:{request_id}:{detector}"
             tool_name = str(finding.get("tool_name") or "")
-            tool_key = _tool_key(exa, server_id, tool_name) if tool_name else None
+            tool_key = ensure_tool_key(exa, server_id, tool_name) if tool_name else None
             exa.execute(
                 """
                 MERGE INTO FACT_RUNTIME_FINDINGS t

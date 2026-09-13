@@ -151,10 +151,12 @@ func run(args []string) error {
 	}, extraEnv...)
 
 	rt := &runsc.Runtime{
+		RunscPath:       os.Getenv("WARDEN_RUNSC_BIN"),
 		BundleRoot:      bundleRoot,
 		Rootfs:          runsc.BundleConfig{RootfsPath: rootfs, Args: command, Env: env, Cwd: *cwd},
 		ProbeBinaryPath: *probePath,
 		Limits:          limits,
+		GlobalFlags:     runscGlobalFlags(),
 	}
 	switch *analyzeMode {
 	case "off":
@@ -523,3 +525,16 @@ type stringList []string
 
 func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+
+// runscGlobalFlags returns the runsc flags this host needs. As root, none:
+// gVisor can configure cgroups. Unprivileged, runsc fails at
+// /sys/fs/cgroup/cgroup.subtree_control and refuses its default network
+// mode, so both must be turned off — the same shape warden-console uses.
+// Rootless keeps seccomp and mount confinement but drops §6.1.5's cgroup
+// limits; the session telemetry says "rootless-no-cgroups" in that case.
+func runscGlobalFlags() []string {
+	if os.Geteuid() == 0 {
+		return nil
+	}
+	return []string{"--rootless", "--ignore-cgroups", "--network=none"}
+}

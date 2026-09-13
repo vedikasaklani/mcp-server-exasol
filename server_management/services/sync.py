@@ -28,7 +28,11 @@ from server_management.database.db_models import (
     ToolBehavioralFinding,
     ToolDeclaration,
 )
-from server_management.services.runtime_telemetry import resolve_server
+from server_management.services.runtime_telemetry import (
+    ensure_analyzer_key,
+    ensure_tool_key,
+    resolve_server,
+)
 
 SCHEMA = "MCP_ANALYTICS"
 
@@ -85,46 +89,6 @@ def _ensure_dim_server(exa: pyexasol.ExaConnection, server: Server) -> str:
     return canonical_id
 
 
-def _get_or_create_tool_key(
-    exa: pyexasol.ExaConnection, server_id: str, tool_name: str | None, scan_run_id: str
-) -> int | None:
-    """Tools are scoped to (server_id, tool_name), not global - the same
-    tool name in two different servers is two different dim_tool rows."""
-    if not tool_name:
-        return None
-    key = exa.execute(
-        "SELECT TOOL_KEY FROM DIM_TOOL WHERE SERVER_ID = {s} AND TOOL_NAME = {t}",
-        {"s": server_id, "t": tool_name},
-    ).fetchval()
-    if key is not None:
-        return key
-    exa.execute(
-        "INSERT INTO DIM_TOOL (SERVER_ID, TOOL_NAME, FIRST_SEEN_SCAN_RUN_ID) VALUES ({s}, {t}, {r})",
-        {"s": server_id, "t": tool_name, "r": scan_run_id},
-    )
-    return exa.execute(
-        "SELECT TOOL_KEY FROM DIM_TOOL WHERE SERVER_ID = {s} AND TOOL_NAME = {t}",
-        {"s": server_id, "t": tool_name},
-    ).fetchval()
-
-
-def _get_or_create_analyzer_key(exa: pyexasol.ExaConnection, analyzer_name: str) -> int:
-    key = exa.execute(
-        "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {a}",
-        {"a": analyzer_name},
-    ).fetchval()
-    if key is not None:
-        return key
-    exa.execute(
-        "INSERT INTO DIM_ANALYZER (ANALYZER_NAME) VALUES ({a})",
-        {"a": analyzer_name},
-    )
-    return exa.execute(
-        "SELECT ANALYZER_KEY FROM DIM_ANALYZER WHERE ANALYZER_NAME = {a}",
-        {"a": analyzer_name},
-    ).fetchval()
-
-
 def _flush_to_fact_table(exa: pyexasol.ExaConnection, rows: list[tuple]) -> None:
     """Stage -> insert-select -> truncate. See the staging-table comment in
     exasol_star_schema.sql for why this indirection exists."""
@@ -154,11 +118,11 @@ def sync_rule_phase_findings(pg_session: Session, scan_run_id: str) -> None:
         # though RuleFinding itself (file/line-based, not tool-name-based)
         # never sets TOOL_KEY - that stays NULL for rule-phase findings.
         for t in tools:
-            _get_or_create_tool_key(exa, canonical_id, t.name, scan_run_id)
+            ensure_tool_key(exa, canonical_id, t.name, scan_run_id)
 
         rows = []
         for f in findings:
-            analyzer_key = _get_or_create_analyzer_key(exa, f.analyzer)
+            analyzer_key = ensure_analyzer_key(exa, f.analyzer)
             details_json = f.details  # already a dict from Postgres JSON column
             reachable = details_json.get("reachable") if isinstance(details_json, dict) else None
             rows.append((
@@ -288,8 +252,8 @@ def sync_llm_phase_findings(pg_session: Session, scan_run_id: str) -> None:
         date_key = _date_key(result.reviewed_at)
         rows = []
         for f in findings:
-            tool_key = _get_or_create_tool_key(exa, canonical_id, f.tool_name, scan_run_id)
-            analyzer_key = _get_or_create_analyzer_key(exa, f.analyzer)
+            tool_key = ensure_tool_key(exa, canonical_id, f.tool_name, scan_run_id)
+            analyzer_key = ensure_analyzer_key(exa, f.analyzer)
             details = json.dumps({
                 "threat_names": f.threat_names,
                 "mcp_taxonomies": f.mcp_taxonomies,

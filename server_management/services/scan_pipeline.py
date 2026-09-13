@@ -1,6 +1,8 @@
-'''Pipeline for scanning: clone -> Phase 1 (rule-based, deterministic) ->
-Phase 2 (Cisco behavioral LLM analysis), unless Phase 1 already FAILed.'''
-'''Do not remove print lines, they are important for logging'''
+"""Pipeline for scanning: clone -> Phase 1 (rule-based, deterministic) ->
+Phase 2 (Cisco behavioral LLM analysis), unless Phase 1 already FAILed.
+
+Do not remove print lines, they are important for logging.
+"""
 
 import asyncio
 import json
@@ -13,7 +15,7 @@ import tempfile
 from sqlalchemy import func
 
 from server_management.api.github_auth import get_installation_token
-from server_management.database.db_config import session as SessionLocal
+from server_management.database.db_config import session_scope
 from server_management.database.db_models import (
     LlmVerdict,
     RuleVerdict,
@@ -50,14 +52,11 @@ def _sanitize(text: str) -> str:
 
 
 def _set_status(scan_run_id: str, status: ScanStatus) -> None:
-    db = SessionLocal()
-    try:
+    with session_scope() as db:
         run = db.get(ScanRun, scan_run_id)
         if run is not None:
             run.status = status
             db.commit()
-    finally:
-        db.close()
 
 
 def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
@@ -75,29 +74,6 @@ def clone_repo(owner_repo: str, commit_sha: str, access_token: str) -> str:
         detail = e.stderr if isinstance(e, subprocess.CalledProcessError) else str(e)
         raise RuntimeError(f"git clone/checkout failed: {_sanitize(detail)}") from e
     return workdir
-
-
-def preserve_for_warden(repo_path: str, server_id: str, scan_run_id: str) -> str | None:
-    """Copy an accepted scan tree into the configured warden source root.
-
-    The clone remains disposable and its .git directory is never copied,
-    because the clone's origin may contain the installation token. Retention
-    is opt-in: without WARDEN_SOURCE_ROOT the normal cleanup behavior is
-    unchanged.
-    """
-    root = os.environ.get("WARDEN_SOURCE_ROOT")
-    if not root:
-        return None
-    safe_server = re.sub(r"[^A-Za-z0-9_.-]", "_", server_id)
-    safe_run = re.sub(r"[^A-Za-z0-9_.-]", "_", scan_run_id)
-    destination = os.path.join(os.path.abspath(root), safe_server, safe_run)
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    shutil.copytree(
-        repo_path,
-        destination,
-        ignore=shutil.ignore_patterns(".git"),
-    )
-    return destination
 
 
 def _run_cli(command: str, repo_path: str, timeout: int) -> dict:
@@ -156,12 +132,9 @@ async def trigger_scan(scan_run_id: str) -> None:
     print(f"scan running... ({scan_run_id})")
     repo_path = None
     try:
-        db = SessionLocal()
-        try:
+        with session_scope() as db:
             run = db.get(ScanRun, scan_run_id)
             server = db.get(Server, run.server_id) if run else None
-        finally:
-            db.close()
 
         if run is None or server is None:
             await scan_fail(scan_run_id, reason="scan run or server not found")
@@ -207,33 +180,21 @@ async def trigger_scan(scan_run_id: str) -> None:
 
         # The manifest + manifest-history commit happens inside
         # record_rule_analysis_result
-        db = SessionLocal()
-        try:
-            record_rule_analysis_result(
-                db, scan_run_id, verdict=rule_verdict,
-                rule_findings=rule_findings, tool_declarations=tool_declarations,
-            )
-        except Exception as e:
-            db.rollback()
-            db.close()
-            await scan_fail(scan_run_id, reason=f"phase 1 recording failed: {e}")
-            return
-        db.close()
+        with session_scope() as db:
+            try:
+                record_rule_analysis_result(
+                    db, scan_run_id, verdict=rule_verdict,
+                    rule_findings=rule_findings, tool_declarations=tool_declarations,
+                )
+            except Exception as e:
+                await scan_fail(scan_run_id, reason=f"phase 1 recording failed: {e}")
+                return
         await asyncio.to_thread(_sync_rule_phase, scan_run_id, run.server_id)
         await scan_pass(scan_run_id, phase="rule", verdict=rule_verdict)
 
         if rule_verdict == RuleVerdict.FAIL:
             print(f"scan {scan_run_id} REJECTED at phase 1 - phase 2 skipped")
             return
-
-        try:
-            preserved = await asyncio.to_thread(
-                preserve_for_warden, repo_path, run.server_id, scan_run_id
-            )
-            if preserved:
-                print(f"accepted source copied for warden: {preserved}")
-        except OSError as e:
-            print(f"warden source copy failed for {scan_run_id}; discarding clone: {e}")
 
         # Phase 2: Cisco behavioral (LLM)
         _set_status(scan_run_id, ScanStatus.LLM_ANALYSIS_RUNNING)
@@ -247,22 +208,19 @@ async def trigger_scan(scan_run_id: str) -> None:
         llm_verdict = _verdict_from_findings(
             llm_findings, LlmVerdict.FAIL, LlmVerdict.PASS_WITH_FINDINGS, LlmVerdict.PASS
         )
-        db = SessionLocal()
-        try:
-            record_llm_analysis_result(db, scan_run_id, verdict=llm_verdict, llm_findings=llm_findings)
-        except ValueError as e:
-            db.rollback()
-            db.close()
-            await scan_fail(scan_run_id, reason=f"phase 2 recording rejected: {e}")
-            return
-        except Exception as e:
-            db.rollback()
-            db.close()
-            await scan_fail(scan_run_id, reason=f"phase 2 recording failed: {e}")
-            return
-        db.close()
+        with session_scope() as db:
+            try:
+                record_llm_analysis_result(db, scan_run_id, verdict=llm_verdict, llm_findings=llm_findings)
+            except ValueError as e:
+                await scan_fail(scan_run_id, reason=f"phase 2 recording rejected: {e}")
+                return
+            except Exception as e:
+                await scan_fail(scan_run_id, reason=f"phase 2 recording failed: {e}")
+                return
         await asyncio.to_thread(_sync_llm_phase, scan_run_id)
-        await scan_pass(scan_run_id, phase="llm", verdict=llm_verdict)
+        await scan_pass(
+            scan_run_id, phase="llm", verdict=llm_verdict, git_token=access_token
+        )
     except Exception as e:
         # Keep unexpected orchestration or database errors from leaving the
         # persisted scan in a non-terminal running state.
@@ -282,68 +240,67 @@ def _sync_scan_lifecycle(scan_run_id: str) -> None:
     invisible in Exasol even though api.py's endpoints cover REJECTED and
     the PASSED transitions. Swallow errors: a down Exasol should never take
     the scan pipeline down with it."""
-    db = SessionLocal()
-    try:
-        sync_scan_run(db, scan_run_id)
-    except Exception as e:
-        print(f"exasol scan-lifecycle sync failed for {scan_run_id}: {e}")
-    finally:
-        db.close()
+    with session_scope() as db:
+        try:
+            sync_scan_run(db, scan_run_id)
+        except Exception as e:
+            print(f"exasol scan-lifecycle sync failed for {scan_run_id}: {e}")
 
 
 def _sync_rule_phase(scan_run_id: str, server_id: str) -> None:
-    """Best-effort sync for rule findings and the manifest after a commit."""
-    db = SessionLocal()
-    try:
-        sync_rule_phase_findings(db, scan_run_id)
-        sync_scan_run(db, scan_run_id)
-        sync_latest_manifest_history(db, server_id)
-    except Exception as e:
-        print(f"exasol rule-phase sync failed for {scan_run_id}: {e}")
-    finally:
-        db.close()
+    """Best-effort sync for rule findings and the manifest after a commit.
+    FACT_SCAN_RUN is left to the scan_pass/scan_fail lifecycle sync."""
+    with session_scope() as db:
+        try:
+            sync_rule_phase_findings(db, scan_run_id)
+            sync_latest_manifest_history(db, server_id)
+        except Exception as e:
+            print(f"exasol rule-phase sync failed for {scan_run_id}: {e}")
 
 
 def _sync_llm_phase(scan_run_id: str) -> None:
-    """Best-effort sync for LLM findings after a commit."""
-    db = SessionLocal()
-    try:
-        sync_llm_phase_findings(db, scan_run_id)
-        sync_scan_run(db, scan_run_id)
-    except Exception as e:
-        print(f"exasol llm-phase sync failed for {scan_run_id}: {e}")
-    finally:
-        db.close()
+    """Best-effort sync for LLM findings after a commit.
+    FACT_SCAN_RUN is left to the scan_pass/scan_fail lifecycle sync."""
+    with session_scope() as db:
+        try:
+            sync_llm_phase_findings(db, scan_run_id)
+        except Exception as e:
+            print(f"exasol llm-phase sync failed for {scan_run_id}: {e}")
 
 
-async def scan_pass(scan_run_id: str, phase: str, verdict) -> None:
+async def scan_pass(
+    scan_run_id: str, phase: str, verdict, git_token: str | None = None
+) -> None:
     print(f"scan has passed... [{phase}] {scan_run_id}: verdict={verdict}")
     await asyncio.to_thread(_sync_scan_lifecycle, scan_run_id)
     if phase == "llm":
-        await asyncio.to_thread(warden_sessions.reconcile_server, _server_id_for_scan(scan_run_id))
+        server_id = _server_id_for_scan(scan_run_id)
+        try:
+            await asyncio.to_thread(
+                warden_sessions.reconcile_server, server_id, git_token
+            )
+        except Exception as exc:
+            print(
+                f"warden profile/session startup failed for {server_id}: {exc}",
+                flush=True,
+            )
 
 
 def _server_id_for_scan(scan_run_id: str) -> str:
-    db = SessionLocal()
-    try:
+    with session_scope() as db:
         run = db.get(ScanRun, scan_run_id)
         if run is None:
             raise RuntimeError(f"scan run not found: {scan_run_id}")
         return run.server_id
-    finally:
-        db.close()
 
 
 async def scan_fail(scan_run_id: str, reason: str) -> None:
     print(f"scan has failed... {scan_run_id}: {reason}")
     terminal = {ScanStatus.REJECTED, ScanStatus.STATIC_ANALYSIS_PASSED, ScanStatus.FAILED}
-    db = SessionLocal()
-    try:
+    with session_scope() as db:
         run = db.get(ScanRun, scan_run_id)
         if run is not None and run.status not in terminal:
             run.status = ScanStatus.FAILED
             run.finished_at = func.now()
             db.commit()
-    finally:
-        db.close()
     await asyncio.to_thread(_sync_scan_lifecycle, scan_run_id)

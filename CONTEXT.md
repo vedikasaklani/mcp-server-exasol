@@ -316,25 +316,66 @@ Docker traffic is intercepted. A real end-to-end telemetry check requires:
 
 ## Session lifecycle integration
 
-Registration and static scanning identify a server, but registration alone
-does not bypass approval. The session manager reconciles a registered server
-after registration and after scan transitions; it starts nothing until a
-human-approved profile, matching approved commit, accepted source tree, and
-structured launch specification all exist. Once eligible, it owns one
-long-lived `warden-serve` process per server. A newly approved commit replaces
-the previous process; a launch-spec edit clears approval and stops the
-process. Starting a new session for every tool call is incorrect.
+Registration and static scanning identify a server. Once a scan is eligible,
+the API coordinator submits the repository identity, exact commit hash, and
+structured launch specification to a separate Warden runner. The runner owns
+the repository checkout, learning/profile subprocess, profile storage, and
+one long-lived `warden-serve` subprocess per server. It replaces the process
+only when the requested commit changes; starting a new session for every tool
+call is incorrect.
 
 Approval is a domain event, not merely a process flag: the manifest records
 the profile path, approver, approval timestamp, and approved commit so the
-trust view can explain which artifact is running. The API exposes this
-metadata and provides an explicit Warden-profile approval operation. Missing
-host configuration or missing source/profile artifacts causes reconciliation
-to fail visibly rather than silently launching an unconfined process.
+trust view can explain which artifact is running. For the current automated
+flow, profile generation and approval are performed by the runner and recorded
+as `vedika`; this is an automation placeholder, not evidence of human review.
+The API stores the runner's profile reference as metadata but does not require
+the profile file to be mounted into the API container.
 
 The launch specification must be structured executable plus arguments, not an
 HTTP string passed through `shell=True` or `split()`. Repository registration
-currently stores repository identity and allowed destinations, not a complete
-runtime command or approved profile. That missing data is the integration seam
-the runner must address before it can safely launch arbitrary registered
-servers.
+stores the repository identity and the complete structured runtime command.
+The runner is the execution boundary: it checks out the exact commit rather
+than receiving a copied source tree from the API. Missing runner configuration,
+checkout errors, profile-generation errors, or Warden process failures are
+surfaced as reconciliation failures rather than silently launching an
+unconfined process.
+
+The scan pipeline does not retain or copy its temporary checkout for Warden.
+This is intentional: the runner independently fetches the same repository and
+commit, so scan cleanup and Warden execution have separate filesystem
+lifecycles.
+
+For private GitHub repositories, the scan exchanges the registered GitHub App
+installation identity for a short-lived installation access token. When the
+scan reaches the Warden-start transition, that same in-memory token is passed
+over the authenticated API-to-runner request. The runner uses it only for its
+own clone and exact-commit fetch, through a temporary Git askpass helper. It is
+not stored in PostgreSQL, manifests, profiles, Warden process arguments, or
+logs, and the helper is removed after checkout. If recovery happens without a
+token from the active scan, the API mints a fresh installation token before
+submitting the runner request.
+
+The scan and Warden therefore perform two independent pulls of the same
+repository state. They do not share a filesystem checkout; the commit hash is
+the consistency boundary.
+
+The GitHub webhook's signature and event headers do not contain a reusable Git
+installation access token. The webhook supplies installation identity in its
+payload; the API exchanges that identity using the App private key before
+scanning or asking Warden to fetch. Recovery reconciliation mints a fresh
+token when there is no active scan token. This exchange is performed in a
+loop-safe helper because startup reconciliation can run while Uvicorn's event
+loop is active; it must not call `asyncio.run()` directly from that loop.
+
+Runner network reachability is a separate deployment concern from GitHub
+authentication. An error such as `Network is unreachable` means the API
+container cannot reach `WARDEN_RUNNER_URL`; it does not mean GitHub rejected
+the installation token. The runner must be listening on an address reachable
+from the API container, and Docker-to-WSL routing/firewall rules must allow
+that port.
+
+The runner has a separate dependency boundary from the API. Its minimal
+Python environment is defined by `warden-runner-requirements.txt` and contains
+only FastAPI, Uvicorn, HTTPX, and Pydantic. It does not need SQLAlchemy,
+PostgreSQL, Exasol, scanner, or API application dependencies.

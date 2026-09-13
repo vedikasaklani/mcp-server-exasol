@@ -44,3 +44,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Run the application
 CMD uvicorn server_management.api.api:app --host 0.0.0.0 --port ${PORT:-8000}
+
+# Warden runs in the Ubuntu/WSL runner, not in this API image.
+# Set WARDEN_RUNNER_URL (and optionally WARDEN_RUNNER_TOKEN) at deployment time.
+ENV WARDEN_RUNNER_URL=http://host.docker.internal:8100

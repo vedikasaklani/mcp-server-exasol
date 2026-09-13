@@ -10,15 +10,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from server_management.api.github_auth import get_installation_token
 from server_management.api.models import RegisterServerRequest
-from server_management.database.db_config import get_db, session as SessionLocal
+from server_management.database.db_config import get_db
+from server_management.database.db_config import session_scope
 from server_management.services.onboard_services import (
     create_scan_run,
     get_server_by_repo_and_installation,
-    register_server,
     normalize_repo_url,
+    register_server,
 )
-from server_management.api.github_auth import get_installation_token
 from server_management.services.scan_pipeline import trigger_scan
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -47,11 +48,8 @@ async def start_initial_scan(
         if not commits or not commits[0].get("sha"):
             raise RuntimeError("GitHub returned no commit for the repository default branch")
 
-        db = SessionLocal()
-        try:
+        with session_scope() as db:
             run = create_scan_run(db, server_id=server_id, commit_sha=commits[0]["sha"])
-        finally:
-            db.close()
         print(f"BACKGROUND INITIAL SCAN STARTING: {run.scan_run_id}", flush=True)
         await trigger_scan(run.scan_run_id)
         print(f"BACKGROUND INITIAL SCAN FINISHED: {run.scan_run_id}", flush=True)
@@ -138,7 +136,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, db
 @router.get("/setup", response_class=HTMLResponse)
 def github_setup(request: Request):
     installation_id = request.query_params.get("installation_id", "")
-    return f"""
+    html = f"""
     <!DOCTYPE html>
     <html>
     <head><title>Register MCP Server</title></head>
@@ -183,3 +181,10 @@ def github_setup(request: Request):
     </body>
     </html>
     """
+    return HTMLResponse(
+        content=html,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )

@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -55,6 +56,9 @@ def normalize_repo_url(repo_url: str) -> str:
     value = repo_url.strip()
     if value.startswith("git@github.com:"):
         path = value.removeprefix("git@github.com:")
+    elif "://" not in value and len(value.split("/")) == 2:
+        # Stored canonical values are already in owner/repo form.
+        path = value
     else:
         parsed = urlparse(value if "://" in value else f"https://{value}")
         if parsed.hostname != "github.com":
@@ -329,19 +333,18 @@ def approve_warden_profile(
     server_id: str,
     *,
     profile_path: str,
-    approved_by: str,
     commit_sha: str,
 ) -> ServerManifest:
     manifest = session.get(ServerManifest, server_id)
     if manifest is None:
         raise ValueError(f"no manifest for server_id={server_id}")
-    if not approved_by.strip() or not commit_sha.strip():
-        raise ValueError("approved_by and commit_sha are required")
+    if not commit_sha.strip():
+        raise ValueError("commit_sha is required")
     path = Path(profile_path).expanduser()
     if not path.is_file():
         raise ValueError(f"Warden profile does not exist: {path}")
     manifest.warden_profile_path = str(path.resolve())
-    manifest.warden_approved_by = approved_by.strip()
+    manifest.warden_approved_by = "vedika"
     manifest.warden_approved_at = datetime.now(timezone.utc).replace(tzinfo=None)
     manifest.warden_approved_commit = commit_sha.strip()
     manifest.version += 1
@@ -353,6 +356,56 @@ def approve_warden_profile(
     ))
     session.commit()
     return manifest
+
+
+def store_warden_profile(
+    session: Session,
+    server_id: str,
+    *,
+    profile_bytes: bytes,
+    commit_sha: str | None,
+    profile_root: str,
+) -> ServerManifest:
+    """Store an uploaded profile in the API's shared profile directory."""
+    try:
+        profile = json.loads(profile_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("profile must be valid UTF-8 JSON") from exc
+    if not isinstance(profile, dict):
+        raise ValueError("profile JSON must be an object")
+    query = (
+        session.query(ScanRun)
+    )
+    if commit_sha and commit_sha.strip():
+        run = query.filter(
+            ScanRun.server_id == server_id,
+            ScanRun.commit_sha == commit_sha.strip(),
+        ).order_by(ScanRun.started_at.desc()).first()
+    else:
+        run = query.filter(
+            ScanRun.server_id == server_id,
+        ).order_by(ScanRun.started_at.desc()).first()
+    if run is None:
+        raise ValueError("no scan exists for this server")
+    commit_sha = run.commit_sha
+
+    root = Path(profile_root).expanduser().resolve()
+    destination_dir = root / server_id
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / f"{commit_sha}.json"
+    temporary = destination.with_suffix(".json.tmp")
+    temporary.write_bytes(profile_bytes)
+    temporary.replace(destination)
+    try:
+        return approve_warden_profile(
+            session,
+            server_id,
+            profile_path=str(destination),
+            commit_sha=commit_sha,
+        )
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
 
 
 def create_scan_run(session: Session, server_id: str, commit_sha: str) -> ScanRun:

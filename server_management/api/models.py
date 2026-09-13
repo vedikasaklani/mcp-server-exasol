@@ -36,7 +36,6 @@ class UpdateManifestRequest(BaseModel):
 
 class ApproveWardenProfileRequest(BaseModel):
     profile_path: str
-    approved_by: str
     commit_sha: str
 
 
@@ -61,7 +60,6 @@ class RuleAnalysisResultRequest(BaseModel):
 class LlmAnalysisResultRequest(BaseModel):
     verdict: LlmVerdict
     llm_findings: list[dict] = Field(default_factory=list)
-    suspicious_branches: list[dict] = Field(default_factory=list)
 
 
 class ToolDeclarationsResponse(BaseModel):

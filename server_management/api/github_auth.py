@@ -1,15 +1,16 @@
+"""GitHub App authentication: app JWT generation and installation token
+exchange using the configured GitHub App credentials."""
 import os
 import time
 
 import httpx
 import jwt
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 GITHUB_APP_ID = os.environ["GITHUB_APP_ID"]
 GITHUB_PRIVATE_KEY = os.environ["GITHUB_PRIVATE_KEY"]
 
-"""this is a specific fix to prevent mismatch of github key and stored .pem key"""
+# This is a specific fix to prevent mismatch of github key and stored .pem key.
 def _load_private_key() -> bytes:
     """
     Load GitHub private key from environment and normalize for JWT signing.
@@ -25,13 +26,13 @@ def _load_private_key() -> bytes:
 
     # Step 2: Normalize escaped sequences to actual newlines
     key = key.replace("\\n", "\n")
-    key = key.replace("\\r\\n", "\n") 
-    key = key.replace("\\r", "")       
-    key = key.replace("\\t", "\t")     
+    key = key.replace("\\r\\n", "\n")
+    key = key.replace("\\r", "")
+    key = key.replace("\\t", "\t")
 
     # Step 3: Clean up whitespace and ensure PEM markers
     key = key.strip()
-    
+
     if not key.startswith("-----BEGIN"):
         raise ValueError(
             "Invalid PEM key: missing BEGIN marker. "
@@ -63,7 +64,6 @@ def _load_private_key() -> bytes:
         serialization.load_pem_private_key(
             normalized_key.encode(),
             password=None,
-            backend=default_backend(),
         )
     except Exception as e:
         raise ValueError(
@@ -81,11 +81,11 @@ def generate_app_jwt() -> str:
     """
     now = int(time.time())
     payload = {
-        "iat": now - 60,        # Issued at 
+        "iat": now - 60,        # Issued at
         "exp": now + 9 * 60,    # Expires in 9 minutes
         "iss": GITHUB_APP_ID,   # GitHub App ID
     }
-    
+
     try:
         private_key = _load_private_key()
         token = jwt.encode(payload, private_key, algorithm="RS256")

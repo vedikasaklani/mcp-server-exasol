@@ -1,8 +1,5 @@
-"""
-models.py - 
-OLTP-shaped: registration data, manifest current-state + versioned history,
-scan run lifecycle.
-"""
+"""PostgreSQL operational models: registration data, manifest current-state
+and versioned history, and scan-run lifecycle."""
 
 from __future__ import annotations
 
@@ -44,14 +41,6 @@ class LlmVerdict(str, enum.Enum):
     PASS = "pass"                               # implementation matches declared intent
     PASS_WITH_FINDINGS = "pass_with_findings"    # minor mismatches, not disqualifying
     FAIL = "fail"                                # high-confidence intent mismatch
-
-
-class Severity(str, enum.Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
 
 
 class Server(Base):

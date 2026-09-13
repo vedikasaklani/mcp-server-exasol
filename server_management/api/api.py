@@ -1,14 +1,15 @@
-"""
-api.py - Registry & Manifest Service HTTP layer (Module 1)
-""" """
-Thin wrapper over the onboard_services.py:
+"""Registry & Manifest Service HTTP layer (Module 1).
+
+Thin wrapper over onboard_services.py:
   - the operator, via POST /servers and PATCH /servers/{id}/manifest
   - your own internal services (Webhook Listener, Static Analysis Engine),
     via the /scan-runs endpoints
 """
 from __future__ import annotations
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+import os
+
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from server_management.api import frontend, githubapp
@@ -25,9 +26,10 @@ from server_management.api.models import (
     UpdateManifestRequest,
     ApproveWardenProfileRequest,
 )
-from server_management.database.db_config import get_db
+from server_management.database.db_config import get_db, session_scope
 from server_management.database.db_models import (
     ScanRun,
+    ServerManifest,
 )
 from server_management.services.onboard_services import (
     create_scan_run,
@@ -39,6 +41,7 @@ from server_management.services.onboard_services import (
     register_server,
     update_manifest,
     approve_warden_profile,
+    store_warden_profile,
 )
 from server_management.services.warden_session_manager import warden_sessions
 from server_management.services.sync import (
@@ -56,12 +59,25 @@ app.include_router(telemetry_router)
 
 @app.on_event("startup")
 def recover_interrupted_scans():
-    db = next(get_db())
-    try:
+    with session_scope() as db:
         mark_interrupted_scans_failed(db)
-    finally:
-        db.close()
     warden_sessions.reconcile_all()
+
+
+def _manifest_response(manifest: ServerManifest) -> ManifestResponse:
+    return ManifestResponse(
+        server_id=manifest.server_id,
+        allowed_destinations=manifest.allowed_destinations,
+        tool_declarations=manifest.tool_declarations,
+        version=manifest.version,
+        launch_executable=manifest.launch_executable,
+        launch_args=manifest.launch_args or [],
+        warden_profile_path=manifest.warden_profile_path,
+        warden_approved_by=manifest.warden_approved_by,
+        warden_approved_at=manifest.warden_approved_at.isoformat()
+        if manifest.warden_approved_at else None,
+        warden_approved_commit=manifest.warden_approved_commit,
+    )
 
 
 #for operators
@@ -97,18 +113,7 @@ def api_get_manifest(server_id: str, db: Session = Depends(get_db)):
     manifest = get_manifest(db, server_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail="server not found")
-    return ManifestResponse(
-        server_id=manifest.server_id,
-        allowed_destinations=manifest.allowed_destinations,
-        tool_declarations=manifest.tool_declarations,
-        version=manifest.version,
-        launch_executable=manifest.launch_executable,
-        launch_args=manifest.launch_args or [],
-        warden_profile_path=manifest.warden_profile_path,
-        warden_approved_by=manifest.warden_approved_by,
-        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
-        warden_approved_commit=manifest.warden_approved_commit,
-    )
+    return _manifest_response(manifest)
 
 @app.patch("/servers/{server_id}/manifest", response_model=ManifestResponse)
 def api_update_manifest(
@@ -128,18 +133,7 @@ def api_update_manifest(
     if req.launch_executable is not None or req.launch_args is not None:
         background_tasks.add_task(warden_sessions.stop_server, server_id)
     background_tasks.add_task(sync_latest_manifest_history, db, server_id)
-    return ManifestResponse(
-        server_id=manifest.server_id,
-        allowed_destinations=manifest.allowed_destinations,
-        tool_declarations=manifest.tool_declarations,
-        version=manifest.version,
-        launch_executable=manifest.launch_executable,
-        launch_args=manifest.launch_args or [],
-        warden_profile_path=manifest.warden_profile_path,
-        warden_approved_by=manifest.warden_approved_by,
-        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
-        warden_approved_commit=manifest.warden_approved_commit,
-    )
+    return _manifest_response(manifest)
 
 
 @app.post("/servers/{server_id}/warden/approve", response_model=ManifestResponse)
@@ -154,24 +148,36 @@ def api_approve_warden_profile(
             db,
             server_id,
             profile_path=req.profile_path,
-            approved_by=req.approved_by,
             commit_sha=req.commit_sha,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     background_tasks.add_task(warden_sessions.reconcile_server, server_id)
-    return ManifestResponse(
-        server_id=manifest.server_id,
-        allowed_destinations=manifest.allowed_destinations,
-        tool_declarations=manifest.tool_declarations,
-        version=manifest.version,
-        launch_executable=manifest.launch_executable,
-        launch_args=manifest.launch_args or [],
-        warden_profile_path=manifest.warden_profile_path,
-        warden_approved_by=manifest.warden_approved_by,
-        warden_approved_at=manifest.warden_approved_at.isoformat() if manifest.warden_approved_at else None,
-        warden_approved_commit=manifest.warden_approved_commit,
-    )
+    return _manifest_response(manifest)
+
+
+@app.post("/servers/{server_id}/warden/profile", response_model=ManifestResponse)
+async def api_upload_warden_profile(
+    server_id: str,
+    background_tasks: BackgroundTasks,
+    profile: UploadFile = File(..., description="Candidate Warden profile JSON"),
+    db: Session = Depends(get_db),
+):
+    profile_bytes = await profile.read()
+    if len(profile_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Warden profile is larger than 10 MiB")
+    try:
+        manifest = store_warden_profile(
+            db,
+            server_id,
+            profile_bytes=profile_bytes,
+            commit_sha=None,
+            profile_root=os.environ.get("WARDEN_PROFILE_ROOT", "/warden-profile"),
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    background_tasks.add_task(warden_sessions.reconcile_server, server_id)
+    return _manifest_response(manifest)
 
 
 #internal, service-to-service

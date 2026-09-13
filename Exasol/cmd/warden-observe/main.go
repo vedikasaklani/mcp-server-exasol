@@ -52,6 +52,7 @@ func run(args []string) error {
 	asJSON := fs.Bool("json", false, "print the report and findings as JSON instead of a human-readable summary")
 	topN := fs.Int("top", 15, "number of syscalls to show in the by-time summary")
 	emitProfile := fs.String("emit-profile", "", "write a candidate CapabilityProfile JSON to this path (it will be UNAPPROVED and must be reviewed before use)")
+	approvedBy := fs.String("approved-by", "", "approver identity to stamp into the emitted profile (empty keeps the profile UNAPPROVED; for automation recording only, not human review)")
 	toolName := fs.String("tool-name", "observed", "tool name to use in the emitted profile")
 	rollupDepth := fs.Int("rollup-depth", 0, "collapse observed paths to N leading directory components in the emitted profile (0 = exact paths)")
 	var writePaths stringList
@@ -102,6 +103,8 @@ func run(args []string) error {
 		Timeout:        *timeout,
 		RequestTimeout: *reqTimeout,
 		LogDir:         *keepLog,
+		RunscPath:      os.Getenv("WARDEN_RUNSC_BIN"),
+		GlobalFlags:    runscGlobalFlags(),
 	})
 	if err != nil && report == nil {
 		return err
@@ -121,7 +124,7 @@ func run(args []string) error {
 	}
 
 	if *emitProfile != "" {
-		return writeCandidateProfile(report, *emitProfile, observe.ProfileOptions{
+		return writeCandidateProfile(report, *approvedBy, *emitProfile, observe.ProfileOptions{
 			ToolName:    *toolName,
 			RollupDepth: *rollupDepth,
 			WritePaths:  writePaths,
@@ -136,10 +139,24 @@ type stringList []string
 func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
-func writeCandidateProfile(report *observe.Report, path string, opts observe.ProfileOptions) error {
+// runscGlobalFlags returns the runsc flags this host needs. As root, none:
+// gVisor can configure cgroups. Unprivileged, runsc fails at
+// /sys/fs/cgroup/cgroup.subtree_control and refuses its default network
+// mode, so both must be turned off — the same shape warden-console uses.
+func runscGlobalFlags() []string {
+	if os.Geteuid() == 0 {
+		return nil
+	}
+	return []string{"--rootless", "--ignore-cgroups", "--network=none"}
+}
+
+func writeCandidateProfile(report *observe.Report, approvedBy, path string, opts observe.ProfileOptions) error {
 	cand, err := observe.GenerateProfile(report, opts)
 	if err != nil {
 		return fmt.Errorf("generate profile: %w", err)
+	}
+	if approvedBy != "" {
+		cand.Profile.ApprovedBy = approvedBy
 	}
 	data, err := json.MarshalIndent(cand.Profile, "", "  ")
 	if err != nil {
@@ -171,10 +188,17 @@ func writeCandidateProfile(report *observe.Report, path string, opts observe.Pro
 			fmt.Printf("    %s  (covers %d observed paths, e.g. %s)\n", w.Granted, w.CoveredN, strings.Join(w.Examples, ", "))
 		}
 	}
-	fmt.Printf("\n  This profile is UNAPPROVED and will fail validation until an operator\n")
-	fmt.Printf("  reviews it and sets \"approved_by\". That gate is deliberate (§3.2 step 5):\n")
-	fmt.Printf("  a server that misbehaved during profiling would otherwise have that\n")
-	fmt.Printf("  behavior baked into its own allowlist.\n")
+
+	if approvedBy != "" {
+		fmt.Printf("\n  approved_by: %s\n", cand.Profile.ApprovedBy)
+		fmt.Printf("  This is an AUTOMATION placeholder approval (see CONTEXT.md). It records who ran\n")
+		fmt.Printf("  the machine flow — it is not evidence of human review.\n")
+	} else {
+		fmt.Printf("\n  This profile is UNAPPROVED and will fail validation until an operator\n")
+		fmt.Printf("  reviews it and sets \"approved_by\". That gate is deliberate (§3.2 step 5):\n")
+		fmt.Printf("  a server that misbehaved during profiling would otherwise have that\n")
+		fmt.Printf("  behavior baked into its own allowlist.\n")
+	}
 	return nil
 }
 
