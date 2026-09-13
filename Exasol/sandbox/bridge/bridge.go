@@ -14,6 +14,8 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +41,8 @@ type Observer struct {
 	// without either field needing a nil check at every call site.
 	mu      sync.Mutex
 	openIDs map[string]string // containerID -> in-flight request id
+	// pending tracks deferred event enrichment so teardown can wait for it.
+	pending sync.WaitGroup
 
 	Storage   *registry.Client
 	ServerID  string
@@ -191,7 +195,65 @@ func (o *Observer) RequestFinished(containerID string, req runtime.ExecRequest, 
 		})
 	}
 	o.emitRuntimeEvent(id, req, out, w, sb, containerID)
+
+	// gVisor writes its trace asynchronously, so the window above routinely
+	// holds none of this call's syscalls yet: at this instant a tool that
+	// just tried to read every credential store on the box is
+	// indistinguishable from one that did nothing. Waiting before the first
+	// emit would make the audit trail lag the traffic, so instead the row
+	// goes out now and is corrected once the trace catches up. The event id
+	// is stable and the write is an upsert, so this updates the same row
+	// rather than adding a second one.
+	o.scheduleEnrichment(id, req, out, containerID)
 }
+
+// enrichDelay is how long to wait for gVisor's trace before re-grading a
+// call. Overridable because the lag scales with trace volume and host load.
+func enrichDelay() time.Duration {
+	if v := os.Getenv("WARDEN_EVENT_ENRICH_DELAY"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 3 * time.Second
+}
+
+func (o *Observer) scheduleEnrichment(id string, req runtime.ExecRequest, out pool.RequestOutcome, containerID string) {
+	if o.Storage == nil || o.ServerID == "" || req.ToolName == "mcp/handshake" {
+		return
+	}
+	o.pending.Add(1)
+	go func() {
+		defer o.pending.Done()
+		time.Sleep(enrichDelay())
+		w, ok := o.mon.LastWindow(containerID, id)
+		if !ok || w == nil {
+			return
+		}
+		sb := &audit.Sandbox{
+			Runtime: "runsc", ContainerID: containerID, AttributionExact: true,
+			SyscallCount:    w.SyscallCount(),
+			DistinctPaths:   w.DistinctPaths(),
+			FileReadBytes:   w.FileReadBytes,
+			FileWriteBytes:  w.FileWriteBytes,
+			NetReadBytes:    w.NetReadBytes,
+			NetWriteBytes:   w.NetWriteBytes,
+			ProcessSpawns:   w.Forks,
+			UnsolicitedMsgs: w.Unsolicited,
+			NetworkConns:    len(w.Dials),
+			Anomalies:       w.Denied,
+		}
+		if out.Denial != "" {
+			sb.SeccompDenials = 1
+		}
+		o.emitRuntimeEvent(id, req, out, w, sb, containerID)
+	}()
+}
+
+// Wait blocks until deferred event enrichment has finished. warden-serve
+// calls it at teardown so a session's final rows reflect the whole trace
+// rather than whatever had been parsed when the last call returned.
+func (o *Observer) Wait() { o.pending.Wait() }
 
 // emitRuntimeEvent sends one FACT_RUNTIME_EVENTS row for this call. It
 // reuses exactly the window data already fetched above rather than
@@ -202,53 +264,10 @@ func (o *Observer) emitRuntimeEvent(id string, req runtime.ExecRequest, out pool
 	if o.Storage == nil || o.ServerID == "" || req.ToolName == "mcp/handshake" {
 		return
 	}
-	decision, reason := "ALLOWED", ""
-	statusCode := 0
-	switch {
-	case out.Denial != "":
-		decision, reason, statusCode = "BLOCKED", out.Denial, 2
-	case out.Failed:
-		decision, reason, statusCode = "FLAGGED", "request failed", 1
-	}
-	var sensitive bool
-	var categories []string
-	var actualDest string
-	match := true // vacuously true when nothing was dialed
-	if w != nil {
-		// Operations the kernel refused during this call. out.Denial is the
-		// pool's own signal and only fires when the supervisor quarantines
-		// the container; a call that merely had several syscalls refused
-		// completes normally and would otherwise read as ALLOWED, which is
-		// true of the call and misleading about what it tried to do.
-		if len(w.Denied) > 0 && decision == "ALLOWED" {
-			decision = "FLAGGED"
-			reason = fmt.Sprintf("%d operation(s) refused by the kernel during this call", len(w.Denied))
-		}
-		if len(w.SecretHits) > 0 || len(w.InjectionHits) > 0 {
-			sensitive = true
-			categories = append(append([]string{}, w.SecretHits...), w.InjectionHits...)
-			if decision == "ALLOWED" {
-				decision, reason = "FLAGGED", "response content matched a secret or injection pattern"
-			}
-		}
-		if len(w.Dials) > 0 {
-			declaredSet := make(map[string]bool, len(o.Networks))
-			for _, n := range o.Networks {
-				declaredSet[n] = true
-			}
-			dests := make([]string, 0, len(w.Dials))
-			for d := range w.Dials {
-				dests = append(dests, d)
-				if !declaredSet[d] {
-					match = false
-				}
-			}
-			actualDest = strings.Join(dests, ",")
-			if !match && decision == "ALLOWED" {
-				decision, reason = "FLAGGED", "connection to a destination outside the declared profile"
-			}
-		}
-	}
+	ev := o.assessCall(req, out, w)
+	decision, reason, statusCode := ev.decision, ev.reason, ev.statusCode
+	sensitive, categories := ev.sensitive, ev.categories
+	actualDest, match := ev.actualDest, ev.destinationMatch
 	declared := strings.Join(o.Networks, ",")
 	// This is a coarse, dashboard-facing signal, not a security decision —
 	// sandbox/analyze's NetworkDrift detector is the authoritative,
@@ -285,10 +304,175 @@ func (o *Observer) emitRuntimeEvent(id string, req runtime.ExecRequest, out pool
 		DistinctPaths:           sb.DistinctPaths,
 		FileReadBytes:           sb.FileReadBytes,
 		FileWriteBytes:          sb.FileWriteBytes,
+		NetReadBytes:            sb.NetReadBytes,
+		NetWriteBytes:           sb.NetWriteBytes,
 		ProcessSpawns:           sb.ProcessSpawns,
 		SeccompDenials:          sb.SeccompDenials,
 		UnsolicitedMsg:          sb.UnsolicitedMsgs,
+		Severity:                ev.severity,
+		Evidence:                ev.evidence,
 	})
+}
+
+// callAssessment is the per-call security verdict: what this one request
+// did, graded on its own evidence.
+type callAssessment struct {
+	decision         string
+	reason           string
+	severity         string
+	statusCode       int
+	sensitive        bool
+	categories       []string
+	evidence         []string
+	actualDest       string
+	destinationMatch bool
+}
+
+var severityRank = map[string]int{"": 0, "none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+func (a *callAssessment) note(severity, reason, evidence string) {
+	a.evidence = append(a.evidence, evidence)
+	if severityRank[severity] > severityRank[a.severity] {
+		a.severity = severity
+		// The reason column reports the most serious thing observed;
+		// everything else stays in evidence rather than being lost.
+		a.reason = reason
+	}
+	if a.decision == "ALLOWED" && severityRank[severity] >= severityRank["low"] {
+		a.decision = "FLAGGED"
+	}
+}
+
+// assessCall grades a single request from the window the kernel produced
+// for it.
+//
+// It deliberately does not consult the session's detector findings. Those
+// are session-scoped and deduplicated by design - a detector reports a
+// behaviour the first time it appears and stays quiet afterwards - so
+// colouring individual calls from them marks the first offending call and
+// reports every later identical one as clean. The same tool exfiltrating
+// credentials on ten consecutive calls would show one flagged row and nine
+// that read as ordinary traffic, which is worse than no signal at all,
+// because it invites the reader to conclude the behaviour stopped.
+//
+// The window is per-request and carries the raw observations, so grading
+// from it gives every call an independently correct verdict.
+func (o *Observer) assessCall(req runtime.ExecRequest, out pool.RequestOutcome, w *analyze.Window) callAssessment {
+	a := callAssessment{decision: "ALLOWED", destinationMatch: true}
+	switch {
+	case out.Denial != "":
+		a.decision, a.reason, a.statusCode, a.severity = "BLOCKED", out.Denial, 2, "critical"
+		a.evidence = append(a.evidence, "supervisor denial: "+out.Denial)
+	case out.Failed:
+		a.decision, a.reason, a.statusCode, a.severity = "FLAGGED", "request failed", 1, "low"
+	}
+	if w == nil {
+		return a
+	}
+
+	// Operations the kernel refused during this call. out.Denial is the
+	// pool's own signal and only fires when the supervisor quarantines the
+	// container; a call that merely had several syscalls refused completes
+	// normally and would otherwise read as ALLOWED, which is true of the
+	// call and misleading about what it tried to do.
+	if len(w.Denied) > 0 {
+		a.note("high",
+			fmt.Sprintf("%d operation(s) refused by the kernel during this call", len(w.Denied)),
+			"kernel refused: "+strings.Join(w.Denied, ", "))
+	}
+
+	// Credential-shaped paths touched during this call. A refused attempt
+	// matters as much as a successful read - arguably more, since it shows
+	// intent that confinement happened to stop - so both are reported, and
+	// the distinction is kept in the evidence rather than collapsed.
+	var readCreds, refusedCreds []string
+	for p, acc := range w.Paths {
+		if !analyze.IsSensitivePath(p) || acc.Kind == analyze.AccessStat {
+			continue
+		}
+		if acc.ReadBytes > 0 || acc.WriteBytes > 0 {
+			readCreds = append(readCreds, fmt.Sprintf("%s (%d bytes)", p, acc.ReadBytes+acc.WriteBytes))
+		} else {
+			refusedCreds = append(refusedCreds, fmt.Sprintf("%s (%d failed open(s))", p, acc.Errors))
+		}
+	}
+	sort.Strings(readCreds)
+	sort.Strings(refusedCreds)
+	if len(readCreds) > 0 {
+		a.sensitive = true
+		a.categories = append(a.categories, "credential_file_read")
+		a.note("critical",
+			fmt.Sprintf("read %d credential-shaped file(s) during this call", len(readCreds)),
+			"credential read: "+strings.Join(readCreds, ", "))
+	}
+	if len(refusedCreds) > 0 {
+		a.sensitive = true
+		a.categories = append(a.categories, "credential_file_access_attempt")
+		a.note("high",
+			fmt.Sprintf("attempted %d credential-shaped path(s); confinement refused them", len(refusedCreds)),
+			"credential access refused: "+strings.Join(refusedCreds, ", "))
+	}
+
+	// Anything executed beyond the declared entrypoint.
+	if len(w.Execs) > 0 {
+		a.note("high",
+			fmt.Sprintf("%d process(es) executed beyond the entrypoint", len(w.Execs)),
+			"exec: "+strings.Join(w.Execs, ", "))
+	} else if w.Forks > 0 {
+		a.note("low",
+			fmt.Sprintf("%d process/thread creation(s) while serving this call", w.Forks),
+			fmt.Sprintf("forks: %d", w.Forks))
+	}
+
+	if len(w.SecretHits) > 0 {
+		a.sensitive = true
+		a.categories = append(a.categories, w.SecretHits...)
+		a.note("high", "response carried credential-shaped content",
+			"secret patterns in response: "+strings.Join(w.SecretHits, ", "))
+	}
+	if len(w.InjectionHits) > 0 {
+		a.sensitive = true
+		a.categories = append(a.categories, w.InjectionHits...)
+		a.note("medium", "response carried instruction-shaped content (prompt injection)",
+			"injection patterns in response: "+strings.Join(w.InjectionHits, ", "))
+	}
+
+	if len(w.Dials) > 0 {
+		declaredSet := make(map[string]bool, len(o.Networks))
+		for _, n := range o.Networks {
+			declaredSet[n] = true
+		}
+		dests := make([]string, 0, len(w.Dials))
+		var undeclared []string
+		for d := range w.Dials {
+			dests = append(dests, d)
+			if !declaredSet[d] {
+				a.destinationMatch = false
+				undeclared = append(undeclared, d)
+			}
+		}
+		sort.Strings(dests)
+		sort.Strings(undeclared)
+		a.actualDest = strings.Join(dests, ",")
+		if len(undeclared) > 0 {
+			a.note("critical", "connected to a destination outside the declared profile",
+				"undeclared destination: "+strings.Join(undeclared, ", "))
+		}
+	}
+
+	// Reading credentials and then writing to the network within one call
+	// is the exfiltration shape per-call authorization structurally cannot
+	// see, so it is graded above either half on its own.
+	if len(readCreds) > 0 && w.NetWriteBytes > 0 {
+		a.note("critical", "credential read followed by network egress in the same call",
+			fmt.Sprintf("read-then-egress: %d credential file(s), %d bytes written to network",
+				len(readCreds), w.NetWriteBytes))
+	}
+
+	if a.severity == "" {
+		a.severity = "none"
+	}
+	return a
 }
 
 // startRequestID returns the caller's request id, or mints one and

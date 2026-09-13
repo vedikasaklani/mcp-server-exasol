@@ -53,12 +53,30 @@ class RuntimeEvent(BaseModel):
     sensitive_data_flag: bool = False
     sensitive_data_categories: list[str] = Field(default_factory=list)
     decision: str = Field(pattern="^(ALLOWED|BLOCKED|FLAGGED)$")
-    decision_reason: str | None = Field(default=None, max_length=255)
+    decision_reason: str | None = Field(default=None, max_length=2000)
     latency_ms: int = Field(ge=0, le=2147483647)
     status_code: int = Field(ge=0, le=99999)
     bytes_sent: int = Field(ge=0)
     bytes_received: int = Field(ge=0)
     retry_count: int = Field(ge=0, le=99999)
+
+    # warden-serve has always sent these; until they were declared here
+    # Pydantic dropped them silently, so the audit trail could say a call
+    # was flagged without being able to say what it touched.
+    severity: str | None = Field(default=None, pattern="^(none|low|medium|high|critical)$")
+    evidence: list[str] = Field(default_factory=list, max_length=200)
+    request_id: str | None = Field(default=None, max_length=64)
+    container_id: str | None = Field(default=None, max_length=128)
+    posture: str | None = Field(default=None, max_length=20)
+    syscall_count: int | None = Field(default=None, ge=0)
+    distinct_paths: int | None = Field(default=None, ge=0)
+    file_read_bytes: int | None = Field(default=None, ge=0)
+    file_write_bytes: int | None = Field(default=None, ge=0)
+    net_read_bytes: int | None = Field(default=None, ge=0)
+    net_write_bytes: int | None = Field(default=None, ge=0)
+    process_spawns: int | None = Field(default=None, ge=0)
+    seccomp_denials: int | None = Field(default=None, ge=0)
+    unsolicited_msgs: int | None = Field(default=None, ge=0)
 
 
 class RuntimeEventBatch(BaseModel):

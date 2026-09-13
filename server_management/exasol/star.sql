@@ -108,12 +108,33 @@ CREATE TABLE IF NOT EXISTS FACT_RUNTIME_EVENTS (
     SENSITIVE_DATA_FLAG         BOOLEAN,   ---??
     SENSITIVE_DATA_CATEGORIES   VARCHAR(500),    ---??           -- serialized JSON array, e.g. ["api_key","email"]
     DECISION                    VARCHAR(20),               -- "ALLOWED" | "BLOCKED" | "FLAGGED"
-    DECISION_REASON              VARCHAR(255), -- ????
+    DECISION_REASON              VARCHAR(2000),
+    -- SEVERITY grades the call; DECISION only says whether it completed.
+    -- EVIDENCE is the serialized JSON array of specific observations behind
+    -- both, so one row explains itself without being correlated by hand
+    -- against the session's findings.
+    SEVERITY                     VARCHAR(20),               -- none|low|medium|high|critical
+    EVIDENCE                     VARCHAR(2000000),
     LATENCY_MS                   DECIMAL(10,0),
     STATUS_CODE                  DECIMAL(5,0),
     BYTES_SENT                   DECIMAL(18,0),
     BYTES_RECEIVED                DECIMAL(18,0),
     RETRY_COUNT                   DECIMAL(5,0),
+    -- Per-call sandbox counters. warden-serve has always measured these;
+    -- without somewhere to put them the audit trail could say a call was
+    -- flagged but not what it touched.
+    REQUEST_ID                   VARCHAR(64),
+    CONTAINER_ID                 VARCHAR(128),
+    POSTURE                      VARCHAR(20),
+    SYSCALL_COUNT                DECIMAL(18,0),
+    DISTINCT_PATHS               DECIMAL(18,0),
+    FILE_READ_BYTES              DECIMAL(18,0),
+    FILE_WRITE_BYTES             DECIMAL(18,0),
+    NET_READ_BYTES               DECIMAL(18,0),
+    NET_WRITE_BYTES              DECIMAL(18,0),
+    PROCESS_SPAWNS               DECIMAL(18,0),
+    SECCOMP_DENIALS              DECIMAL(18,0),
+    UNSOLICITED_MSG              DECIMAL(18,0),
     LOADED_AT                     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (EVENT_ID),
     CONSTRAINT FK_FRE_SERVER FOREIGN KEY (SERVER_ID) REFERENCES DIM_SERVER (SERVER_ID) DISABLE,

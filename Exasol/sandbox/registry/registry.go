@@ -438,9 +438,20 @@ type RuntimeEvent struct {
 	DistinctPaths  int   `json:"distinct_paths,omitempty"`
 	FileReadBytes  int64 `json:"file_read_bytes,omitempty"`
 	FileWriteBytes int64 `json:"file_write_bytes,omitempty"`
+	NetReadBytes   int64 `json:"net_read_bytes,omitempty"`
+	NetWriteBytes  int64 `json:"net_write_bytes,omitempty"`
 	ProcessSpawns  int   `json:"process_spawns,omitempty"`
 	SeccompDenials int   `json:"seccomp_denials,omitempty"`
 	UnsolicitedMsg int   `json:"unsolicited_msgs,omitempty"`
+
+	// Severity grades the call itself, which Decision cannot: a call that
+	// completed is ALLOWED or FLAGGED regardless of whether it quietly read
+	// one permitted config file or tried to open every credential store on
+	// the box. Evidence carries the specific observations behind both, so a
+	// reviewer reading one row does not have to correlate it by hand
+	// against the session's findings to learn what actually happened.
+	Severity string   `json:"severity,omitempty"` // none|low|medium|high|critical
+	Evidence []string `json:"evidence,omitempty"`
 }
 
 // RuntimeFinding is one behavioural detection, for FACT_RUNTIME_FINDINGS.

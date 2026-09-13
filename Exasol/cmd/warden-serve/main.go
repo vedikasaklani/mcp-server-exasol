@@ -399,6 +399,11 @@ func run(args []string) error {
 	finalSnap := mon.Aggregate()
 	finalFindings := mon.Findings()
 	if obs.Storage != nil {
+		// Deferred per-call re-grading first: it is what turns the last few
+		// calls' rows from "nothing observed yet" into what the trace
+		// actually showed, and it enqueues the writes the drain below waits
+		// on.
+		obs.Wait()
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := obs.Storage.Wait(drainCtx); err != nil {
 			fmt.Fprintln(os.Stderr, "telemetry drain:", err)

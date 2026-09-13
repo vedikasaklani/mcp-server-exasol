@@ -43,8 +43,58 @@ def _connect() -> pyexasol.ExaConnection:
         exa.execute(
             "ALTER TABLE FACT_RUNTIME_EVENTS MODIFY EVENT_ID VARCHAR(255)"
         )
+    _ensure_event_columns(exa)
     _ensure_dim_date(exa)
     return exa
+
+
+# Per-call forensics added to FACT_RUNTIME_EVENTS after the table shipped.
+# star.sql only creates tables IF NOT EXISTS, so an existing deployment
+# never gains a column from editing it - these have to be added explicitly,
+# the same way the EVENT_ID widening above is.
+_EVENT_COLUMNS = {
+    "SEVERITY": "VARCHAR(20)",
+    "EVIDENCE": "VARCHAR(2000000)",
+    "REQUEST_ID": "VARCHAR(64)",
+    "CONTAINER_ID": "VARCHAR(128)",
+    "POSTURE": "VARCHAR(20)",
+    "SYSCALL_COUNT": "DECIMAL(18,0)",
+    "DISTINCT_PATHS": "DECIMAL(18,0)",
+    "FILE_READ_BYTES": "DECIMAL(18,0)",
+    "FILE_WRITE_BYTES": "DECIMAL(18,0)",
+    "NET_READ_BYTES": "DECIMAL(18,0)",
+    "NET_WRITE_BYTES": "DECIMAL(18,0)",
+    "PROCESS_SPAWNS": "DECIMAL(18,0)",
+    "SECCOMP_DENIALS": "DECIMAL(18,0)",
+    "UNSOLICITED_MSG": "DECIMAL(18,0)",
+}
+
+
+def _ensure_event_columns(exa: pyexasol.ExaConnection) -> None:
+    existing = {
+        row[0]
+        for row in exa.execute(
+            """
+            SELECT COLUMN_NAME FROM EXA_ALL_COLUMNS
+            WHERE COLUMN_SCHEMA = {schema} AND COLUMN_TABLE = 'FACT_RUNTIME_EVENTS'
+            """,
+            {"schema": SCHEMA},
+        ).fetchall()
+    }
+    for name, ddl in _EVENT_COLUMNS.items():
+        if name not in existing:
+            exa.execute(f"ALTER TABLE FACT_RUNTIME_EVENTS ADD COLUMN {name} {ddl}")
+    # The original reason column was too narrow to hold an explanation.
+    width = exa.execute(
+        """
+        SELECT COLUMN_MAXSIZE FROM EXA_ALL_COLUMNS
+        WHERE COLUMN_SCHEMA = {schema} AND COLUMN_TABLE = 'FACT_RUNTIME_EVENTS'
+          AND COLUMN_NAME = 'DECISION_REASON'
+        """,
+        {"schema": SCHEMA},
+    ).fetchval()
+    if width is not None and int(width) < 2000:
+        exa.execute("ALTER TABLE FACT_RUNTIME_EVENTS MODIFY DECISION_REASON VARCHAR(2000)")
 
 
 def _ensure_dim_date(exa: pyexasol.ExaConnection) -> None:
@@ -226,7 +276,19 @@ def write_runtime_events(server_id: str, events: list[dict[str, Any]]) -> int:
                            CAST({status} AS DECIMAL(5,0)) AS STATUS_CODE,
                            CAST({sent} AS DECIMAL(18,0)) AS BYTES_SENT,
                            CAST({received} AS DECIMAL(18,0)) AS BYTES_RECEIVED,
-                           CAST({retry} AS DECIMAL(5,0)) AS RETRY_COUNT
+                           CAST({retry} AS DECIMAL(5,0)) AS RETRY_COUNT,
+                           {severity} AS SEVERITY, {evidence} AS EVIDENCE,
+                           {request_id} AS REQUEST_ID, {container_id} AS CONTAINER_ID,
+                           {posture} AS POSTURE,
+                           CAST({syscalls} AS DECIMAL(18,0)) AS SYSCALL_COUNT,
+                           CAST({paths} AS DECIMAL(18,0)) AS DISTINCT_PATHS,
+                           CAST({fread} AS DECIMAL(18,0)) AS FILE_READ_BYTES,
+                           CAST({fwrite} AS DECIMAL(18,0)) AS FILE_WRITE_BYTES,
+                           CAST({nread} AS DECIMAL(18,0)) AS NET_READ_BYTES,
+                           CAST({nwrite} AS DECIMAL(18,0)) AS NET_WRITE_BYTES,
+                           CAST({spawns} AS DECIMAL(18,0)) AS PROCESS_SPAWNS,
+                           CAST({denials} AS DECIMAL(18,0)) AS SECCOMP_DENIALS,
+                           CAST({unsolicited} AS DECIMAL(18,0)) AS UNSOLICITED_MSG
                 ) s
                 ON (t.EVENT_ID = s.EVENT_ID)
                 WHEN MATCHED THEN UPDATE SET
@@ -240,19 +302,35 @@ def write_runtime_events(server_id: str, events: list[dict[str, Any]]) -> int:
                     t.SENSITIVE_DATA_CATEGORIES = s.SENSITIVE_DATA_CATEGORIES,
                     t.LATENCY_MS = s.LATENCY_MS, t.STATUS_CODE = s.STATUS_CODE,
                     t.BYTES_SENT = s.BYTES_SENT, t.BYTES_RECEIVED = s.BYTES_RECEIVED,
-                    t.RETRY_COUNT = s.RETRY_COUNT
+                    t.RETRY_COUNT = s.RETRY_COUNT,
+                    t.SEVERITY = s.SEVERITY, t.EVIDENCE = s.EVIDENCE,
+                    t.REQUEST_ID = s.REQUEST_ID, t.CONTAINER_ID = s.CONTAINER_ID,
+                    t.POSTURE = s.POSTURE,
+                    t.SYSCALL_COUNT = s.SYSCALL_COUNT, t.DISTINCT_PATHS = s.DISTINCT_PATHS,
+                    t.FILE_READ_BYTES = s.FILE_READ_BYTES, t.FILE_WRITE_BYTES = s.FILE_WRITE_BYTES,
+                    t.NET_READ_BYTES = s.NET_READ_BYTES, t.NET_WRITE_BYTES = s.NET_WRITE_BYTES,
+                    t.PROCESS_SPAWNS = s.PROCESS_SPAWNS, t.SECCOMP_DENIALS = s.SECCOMP_DENIALS,
+                    t.UNSOLICITED_MSG = s.UNSOLICITED_MSG
                 WHEN NOT MATCHED THEN INSERT (
                     EVENT_ID, SERVER_ID, TOOL_KEY, AGENT_ID, SESSION_ID, DATE_KEY,
                     EVENT_TS, DESTINATION_DECLARED, DESTINATION_ACTUAL,
                     DESTINATION_MATCH, INTENT_MATCH, SENSITIVE_DATA_FLAG,
                     SENSITIVE_DATA_CATEGORIES, DECISION, DECISION_REASON, LATENCY_MS,
-                    STATUS_CODE, BYTES_SENT, BYTES_RECEIVED, RETRY_COUNT
+                    STATUS_CODE, BYTES_SENT, BYTES_RECEIVED, RETRY_COUNT,
+                    SEVERITY, EVIDENCE, REQUEST_ID, CONTAINER_ID, POSTURE,
+                    SYSCALL_COUNT, DISTINCT_PATHS, FILE_READ_BYTES, FILE_WRITE_BYTES,
+                    NET_READ_BYTES, NET_WRITE_BYTES, PROCESS_SPAWNS, SECCOMP_DENIALS,
+                    UNSOLICITED_MSG
                 ) VALUES (
                     s.EVENT_ID, s.SERVER_ID, s.TOOL_KEY, s.AGENT_ID, s.SESSION_ID, s.DATE_KEY,
                     s.EVENT_TS, s.DESTINATION_DECLARED, s.DESTINATION_ACTUAL,
                     s.DESTINATION_MATCH, s.INTENT_MATCH, s.SENSITIVE_DATA_FLAG,
                     s.SENSITIVE_DATA_CATEGORIES, s.DECISION, s.DECISION_REASON, s.LATENCY_MS,
-                    s.STATUS_CODE, s.BYTES_SENT, s.BYTES_RECEIVED, s.RETRY_COUNT
+                    s.STATUS_CODE, s.BYTES_SENT, s.BYTES_RECEIVED, s.RETRY_COUNT,
+                    s.SEVERITY, s.EVIDENCE, s.REQUEST_ID, s.CONTAINER_ID, s.POSTURE,
+                    s.SYSCALL_COUNT, s.DISTINCT_PATHS, s.FILE_READ_BYTES, s.FILE_WRITE_BYTES,
+                    s.NET_READ_BYTES, s.NET_WRITE_BYTES, s.PROCESS_SPAWNS, s.SECCOMP_DENIALS,
+                    s.UNSOLICITED_MSG
                 )
                 """,
                 {
@@ -276,6 +354,20 @@ def write_runtime_events(server_id: str, events: list[dict[str, Any]]) -> int:
                     "sent": event.get("bytes_sent"),
                     "received": event.get("bytes_received"),
                     "retry": event.get("retry_count"),
+                    "severity": event.get("severity"),
+                    "evidence": json.dumps(event.get("evidence") or []),
+                    "request_id": event.get("request_id"),
+                    "container_id": event.get("container_id"),
+                    "posture": event.get("posture"),
+                    "syscalls": event.get("syscall_count"),
+                    "paths": event.get("distinct_paths"),
+                    "fread": event.get("file_read_bytes"),
+                    "fwrite": event.get("file_write_bytes"),
+                    "nread": event.get("net_read_bytes"),
+                    "nwrite": event.get("net_write_bytes"),
+                    "spawns": event.get("process_spawns"),
+                    "denials": event.get("seccomp_denials"),
+                    "unsolicited": event.get("unsolicited_msgs"),
                 },
             )
             written += 1
@@ -292,7 +384,12 @@ def get_runtime_events(server_id: str, limit: int) -> list[dict[str, Any]]:
             SELECT e.EVENT_ID, t.TOOL_NAME, e.EVENT_TS, e.DECISION,
                    e.DECISION_REASON, e.SENSITIVE_DATA_FLAG,
                    e.SENSITIVE_DATA_CATEGORIES, e.DESTINATION_MATCH,
-                   e.LATENCY_MS, e.BYTES_SENT, e.BYTES_RECEIVED, e.SESSION_ID
+                   e.LATENCY_MS, e.BYTES_SENT, e.BYTES_RECEIVED, e.SESSION_ID,
+                   e.SEVERITY, e.EVIDENCE, e.REQUEST_ID, e.POSTURE,
+                   e.SYSCALL_COUNT, e.DISTINCT_PATHS, e.FILE_READ_BYTES,
+                   e.FILE_WRITE_BYTES, e.NET_READ_BYTES, e.NET_WRITE_BYTES,
+                   e.PROCESS_SPAWNS, e.SECCOMP_DENIALS, e.UNSOLICITED_MSG,
+                   e.DESTINATION_DECLARED, e.DESTINATION_ACTUAL, e.CONTAINER_ID
             FROM FACT_RUNTIME_EVENTS e
             LEFT JOIN DIM_TOOL t ON t.TOOL_KEY = e.TOOL_KEY
             WHERE e.SERVER_ID = {{server_id}}
@@ -301,6 +398,36 @@ def get_runtime_events(server_id: str, limit: int) -> list[dict[str, Any]]:
             """,
             {"server_id": server_id},
         ).fetchall()
+
+        # Detector findings raised during these same calls. They are
+        # session-scoped and fire once per behaviour, so they cannot grade
+        # an individual call (SEVERITY does that) - but where one exists it
+        # is the fullest explanation available, and a reviewer should not
+        # have to open another view to reach it.
+        findings: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for f in exa.execute(
+            """
+            SELECT SESSION_ID, REQUEST_ID, DETECTOR, FAMILY, SEVERITY,
+                   CONFIDENCE, KERNEL_ATTESTED, TITLE, DETAIL, EVIDENCE
+            FROM FACT_RUNTIME_FINDINGS
+            WHERE SERVER_ID = {server_id} AND REQUEST_ID IS NOT NULL
+            """,
+            {"server_id": server_id},
+        ).fetchall():
+            findings.setdefault((f[0] or "", f[1] or ""), []).append({
+                "detector": f[2],
+                "family": f[3] or "",
+                "severity": f[4],
+                "confidence": f[5] or "",
+                "kernel_attested": bool(f[6]),
+                "title": f[7] or "",
+                "detail": f[8] or "",
+                "evidence": json.loads(f[9]) if f[9] else [],
+            })
+
+        def _num(value: Any) -> int | None:
+            return int(value) if value is not None else None
+
         return [
             {
                 "event_id": row[0],
@@ -315,6 +442,23 @@ def get_runtime_events(server_id: str, limit: int) -> list[dict[str, Any]]:
                 "bytes_sent": row[9] or 0,
                 "bytes_received": row[10] or 0,
                 "session_id": row[11] or "",
+                "severity": row[12] or "none",
+                "evidence": json.loads(row[13]) if row[13] else [],
+                "request_id": row[14] or "",
+                "posture": row[15] or "",
+                "syscall_count": _num(row[16]),
+                "distinct_paths": _num(row[17]),
+                "file_read_bytes": _num(row[18]),
+                "file_write_bytes": _num(row[19]),
+                "net_read_bytes": _num(row[20]),
+                "net_write_bytes": _num(row[21]),
+                "process_spawns": _num(row[22]),
+                "seccomp_denials": _num(row[23]),
+                "unsolicited_msgs": _num(row[24]),
+                "destination_declared": row[25] or "",
+                "destination_actual": row[26] or "",
+                "container_id": row[27] or "",
+                "findings": findings.get((row[11] or "", row[14] or ""), []),
             }
             for row in rows
         ]
