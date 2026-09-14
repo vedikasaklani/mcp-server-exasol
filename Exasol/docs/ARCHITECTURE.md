@@ -40,7 +40,7 @@ These are load-bearing. Violating one is a design bug, not a tradeoff.
 | Proxy gateway | Transport interception, admission, authorization, response guard | Go |
 | IBAC engine | Deterministic policy + intent constraint + escalation | OpenFGA, local classifier model |
 | Sandbox | Confined ephemeral execution | runsc / Firecracker, seccomp-bpf, Landlock, netns, Tetragon |
-| Telemetry | Hash-chained audit log, metrics, posture and reliability scoring | SQLite → Postgres → ClickHouse (staged) |
+| Telemetry | Hash-chained audit log, metrics, posture and reliability scoring | SQLite (local audit log) + Exasol (analytical store — trust score, runtime events, findings) |
 
 ---
 
@@ -424,8 +424,9 @@ Intent constraint classifier. Cosign attestation and automated profiling.
 Response guard. HTTP/SSE transport.
 
 **v2 — hardening and scale.** Firecracker option, Tetragon enforcement, risk
-escalation classifier, credential brokering, ClickHouse telemetry. Kafka only
-when a single writer demonstrably cannot keep up.
+escalation classifier, credential brokering. Kafka only when a single writer
+demonstrably cannot keep up. (Analytical telemetry landed early, into Exasol —
+see `docs/EXASOL_INTEGRATION.md` — rather than waiting for v2.)
 
 Starting point is §6, the sandbox layer. It is the only component with no
 dependency on the others, and everything above it is worthless without it.
