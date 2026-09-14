@@ -14,24 +14,36 @@ import {
   CardHeader,
   EmptyState,
   ErrorState,
-  LiveBadge,
-  Mono,
   PageHeader,
   ScoreRing,
   SeverityBadge,
-  SeverityBar,
+  SeverityRing,
   Sparkline,
   Spinner,
   StatCard,
+  StatusBadge,
+  type ServerStatus,
   num,
-  relativeTime,
 } from "@/components/ui";
 
 interface Row {
   server: ServerSummary;
   live: boolean;
+  posture: string | null;
   findings: RuntimeFinding[];
   events: RuntimeEvent[];
+}
+
+const WORST_ORDER = ["critical", "high", "medium"] as const;
+
+// The gateway only tells us "running or not"; whether that running process
+// is settled and trusted, actively being punished for misbehaving, or still
+// too new to have a verdict comes from its most recent session's posture.
+function deriveStatus(live: boolean, posture: string | null): ServerStatus {
+  if (!live) return "offline";
+  if (posture === "QUARANTINE") return "quarantine";
+  if (posture === "TRUSTED") return "confined";
+  return "running";
 }
 
 export default function OverviewPage() {
@@ -44,12 +56,13 @@ export default function OverviewPage() {
       const servers = await api.listServers();
       const built = await Promise.all(
         servers.map(async (server) => {
-          const [live, findings, events] = await Promise.all([
+          const [live, findings, events, sessions] = await Promise.all([
             api.getLiveStatus(server.server_id).then((s) => s.running).catch(() => false),
             api.getRuntimeFindings(server.server_id, 50).catch(() => []),
             api.getRuntimeEvents(server.server_id, 200).catch(() => []),
+            api.getSessions(server.server_id, 1).catch(() => []),
           ]);
-          return { server, live, findings, events };
+          return { server, live, posture: sessions[0]?.posture ?? null, findings, events };
         })
       );
       setRows(built);
@@ -78,7 +91,7 @@ export default function OverviewPage() {
       severity: { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>,
       scored: [] as number[],
       volume: [] as number[],
-      alerts: [] as Array<RuntimeFinding & { source: string }>,
+      alerts: [] as Array<RuntimeFinding & { source: string; serverId: string }>,
     };
     if (!rows) return out;
     const buckets = new Array(24).fill(0);
@@ -89,7 +102,7 @@ export default function OverviewPage() {
       findings.forEach((f) => {
         const s = f.severity?.toLowerCase();
         if (s in out.severity) out.severity[s] += 1;
-        out.alerts.push({ ...f, source: server.source });
+        out.alerts.push({ ...f, source: server.source, serverId: server.server_id });
       });
       events.forEach((e) => {
         out.calls += 1;
@@ -123,6 +136,11 @@ export default function OverviewPage() {
 
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!rows) return <Spinner label="Loading fleet…" />;
+
+  // Never run and never scored - just a registration with nothing to show
+  // yet. Listing those is noise; they reappear here the moment either
+  // happens.
+  const liveRows = rows.filter((r) => r.live || r.server.overall_score !== null);
 
   return (
     <>
@@ -168,36 +186,48 @@ export default function OverviewPage() {
         />
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <Card padded={false}>
+      <div className="mt-8 grid gap-4 xl:grid-cols-4">
+        <Card padded={false} className="xl:col-span-2">
           <CardHeader
             title="Fleet"
             subtitle="Reputation, confinement state and call volume per server"
-            right={<Link href="/discovery" className="text-[12px] text-accent hover:underline">Discovery →</Link>}
+            right={<Link href="/discovery" className="text-[12px] text-primary hover:underline">Discovery →</Link>}
           />
           {rows.length === 0 ? (
             <EmptyState title="No servers registered" hint="Connect one to begin." />
+          ) : liveRows.length === 0 ? (
+            <EmptyState
+              title="Nothing live or scored yet"
+              hint="Registered servers show up here once they've run at least once or been scored."
+            />
           ) : (
             <div className="divide-y divide-border">
-              {rows
+              {liveRows
                 .slice()
                 .sort((a, b) => (a.server.overall_score ?? 101) - (b.server.overall_score ?? 101))
-                .map(({ server, live, findings, events }) => {
+                .map(({ server, live, posture, findings, events }) => {
                   const counts = findings.reduce<Record<string, number>>((acc, f) => {
                     const s = f.severity?.toLowerCase() ?? "none";
                     acc[s] = (acc[s] || 0) + 1;
                     return acc;
                   }, {});
+                  const worst = WORST_ORDER.find((s) => counts[s]);
                   return (
-                    <div key={server.server_id} className="flex items-center gap-4 px-5 py-3.5">
-                      <ScoreRing score={server.overall_score} size={46} />
+                    <Link
+                      key={server.server_id}
+                      href={`/servers/${server.server_id}`}
+                      className="flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-surface-hover"
+                    >
+                      {server.overall_score !== null ? (
+                        <SeverityRing score={server.overall_score} counts={counts} size={46} />
+                      ) : (
+                        <ScoreRing score={null} size={46} />
+                      )}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <span className="truncate text-[13px] font-medium text-text">{server.source}</span>
-                          <LiveBadge live={live} />
-                        </div>
-                        <div className="mt-1.5">
-                          <SeverityBar counts={counts} />
+                          <StatusBadge status={deriveStatus(live, posture)} />
+                          {worst && <SeverityBadge severity={worst} />}
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-[11.5px] text-text-faint">
                           <span className="tabular">{events.length} calls</span>
@@ -208,24 +238,18 @@ export default function OverviewPage() {
                           {server.overall_score === null && <span>not yet scored</span>}
                         </div>
                       </div>
-                      <Link
-                        href="/monitoring"
-                        className="shrink-0 text-[12px] text-text-faint transition-colors hover:text-accent"
-                      >
-                        Monitor →
-                      </Link>
-                    </div>
+                    </Link>
                   );
                 })}
             </div>
           )}
         </Card>
 
-        <Card padded={false}>
+        <Card padded={false} className="xl:col-span-2">
           <CardHeader
             title="Security alerts"
             subtitle="Behavioural findings from confined sessions, newest first"
-            right={<Link href="/audit" className="text-[12px] text-accent hover:underline">Audit →</Link>}
+            right={<Link href="/audit" className="text-[12px] text-primary hover:underline">Audit →</Link>}
           />
           {agg.alerts.length === 0 ? (
             <EmptyState
@@ -235,27 +259,17 @@ export default function OverviewPage() {
           ) : (
             <div className="max-h-[520px] divide-y divide-border overflow-y-auto">
               {agg.alerts.slice(0, 25).map((f, i) => (
-                <div key={i} className="px-5 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SeverityBadge severity={f.severity} />
-                      <span className="text-[12.5px] font-medium text-text">{f.title}</span>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-text-faint">{relativeTime(f.event_ts)}</span>
+                <Link
+                  key={i}
+                  href={`/servers/${f.serverId}#security-findings`}
+                  className="flex items-start gap-2.5 px-5 py-3 transition-colors hover:bg-surface-hover"
+                >
+                  <SeverityBadge severity={f.severity} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12.5px] text-text">{f.title}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-text-faint">{f.source}</div>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-text-faint">
-                    <span>{f.source}</span>
-                    <span>·</span>
-                    <Mono>{f.detector}</Mono>
-                    {f.kernel_attested && (
-                      <>
-                        <span>·</span>
-                        <span className="text-accent">kernel-attested</span>
-                      </>
-                    )}
-                  </div>
-                  {f.detail && <p className="mt-1 text-[11.5px] leading-snug text-text-muted">{f.detail}</p>}
-                </div>
+                </Link>
               ))}
             </div>
           )}

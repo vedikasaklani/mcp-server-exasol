@@ -8,14 +8,17 @@ export function Card({
   children,
   className = "",
   padded = true,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   padded?: boolean;
+  id?: string;
 }) {
   return (
     <div
-      className={`rounded-xl border border-border bg-surface ${padded ? "p-5" : ""} ${className}`}
+      id={id}
+      className={`rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.3)] ${padded ? "p-5" : ""} ${className}`}
     >
       {children}
     </div>
@@ -78,11 +81,11 @@ export function Button({
   type?: "button" | "submit";
 }) {
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45";
+    "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45";
   const sizes = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-2 text-[13px]";
   const variants = {
     default: "border border-border-strong bg-surface-2 text-text hover:bg-surface-hover",
-    primary: "bg-accent text-[#04100e] hover:bg-accent-dim font-semibold",
+    primary: "bg-primary text-primary-foreground shadow-[0_1px_0_0_rgba(255,255,255,0.12)_inset] hover:bg-primary/90 font-semibold",
     danger: "border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20",
     ghost: "text-text-muted hover:bg-surface-hover hover:text-text",
   }[variant];
@@ -95,11 +98,66 @@ export function Button({
 
 /* ----------------------------------------------------------------- status */
 
+type IconProps = { className?: string };
+
+function CheckIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
+function AlertIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
+function XCircleIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6" />
+      <path d="m9 9 6 6" />
+    </svg>
+  );
+}
+
+function PowerIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+      <line x1="12" x2="12" y1="2" y2="12" />
+    </svg>
+  );
+}
+
+function LoaderIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" x2="12" y1="2" y2="6" />
+      <line x1="12" x2="12" y1="18" y2="22" />
+      <line x1="4.93" x2="7.76" y1="4.93" y2="7.76" />
+      <line x1="16.24" x2="19.07" y1="16.24" y2="19.07" />
+      <line x1="2" x2="6" y1="12" y2="12" />
+      <line x1="18" x2="22" y1="12" y2="12" />
+      <line x1="4.93" x2="7.76" y1="19.07" y2="16.24" />
+      <line x1="16.24" x2="19.07" y1="7.76" y2="4.93" />
+    </svg>
+  );
+}
+
 const SEVERITY_STYLE: Record<string, { fg: string; bg: string; label: string }> = {
-  critical: { fg: "text-sev-critical", bg: "bg-sev-critical/12 border-sev-critical/30", label: "Critical" },
-  high: { fg: "text-sev-high", bg: "bg-sev-high/12 border-sev-high/30", label: "High" },
-  medium: { fg: "text-sev-medium", bg: "bg-sev-medium/12 border-sev-medium/30", label: "Medium" },
-  low: { fg: "text-sev-low", bg: "bg-sev-low/12 border-sev-low/30", label: "Low" },
+  critical: { fg: "text-sev-critical", bg: "bg-sev-critical/20 border-sev-critical/35", label: "Critical" },
+  high: { fg: "text-sev-high", bg: "bg-sev-high/20 border-sev-high/35", label: "High" },
+  medium: { fg: "text-sev-medium", bg: "bg-sev-medium/20 border-sev-medium/35", label: "Medium" },
+  low: { fg: "text-sev-low", bg: "bg-sev-low/20 border-sev-low/35", label: "Low" },
   none: { fg: "text-text-faint", bg: "bg-surface-2 border-border", label: "Clean" },
   info: { fg: "text-text-faint", bg: "bg-surface-2 border-border", label: "Info" },
 };
@@ -112,7 +170,7 @@ export function SeverityBadge({ severity, label }: { severity: string; label?: s
   const s = severityStyle(severity);
   return (
     <span
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${s.bg} ${s.fg}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${s.bg} ${s.fg}`}
     >
       {label ?? s.label}
     </span>
@@ -120,18 +178,15 @@ export function SeverityBadge({ severity, label }: { severity: string; label?: s
 }
 
 export function DecisionBadge({ decision }: { decision: string }) {
-  const map: Record<string, string> = {
-    ALLOWED: "border-success/30 bg-success/10 text-success",
-    FLAGGED: "border-sev-medium/30 bg-sev-medium/10 text-sev-medium",
-    BLOCKED: "border-danger/35 bg-danger/12 text-danger",
+  const map: Record<string, { cls: string; icon: ReactNode }> = {
+    ALLOWED: { cls: "bg-success/20 text-success", icon: <CheckIcon className="h-3 w-3 shrink-0" /> },
+    FLAGGED: { cls: "bg-sev-medium/20 text-sev-medium", icon: <AlertIcon className="h-3 w-3 shrink-0" /> },
+    BLOCKED: { cls: "bg-danger/20 text-danger", icon: <XCircleIcon className="h-3 w-3 shrink-0" /> },
   };
+  const s = map[decision] ?? { cls: "bg-surface-2 text-text-muted", icon: null };
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] font-medium ${
-        map[decision] ?? "border-border bg-surface-2 text-text-muted"
-      }`}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${s.cls}`}>
+      {s.icon}
       {decision.charAt(0) + decision.slice(1).toLowerCase()}
     </span>
   );
@@ -140,16 +195,38 @@ export function DecisionBadge({ decision }: { decision: string }) {
 export function LiveBadge({ live }: { live: boolean }) {
   if (!live) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-2 px-2 py-0.5 text-[11px] text-text-faint">
-        <span className="h-1.5 w-1.5 rounded-full bg-text-faint" />
+      <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-[11px] text-text-faint">
+        <PowerIcon className="h-3 w-3 shrink-0" />
         Offline
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
-      <span className="live-dot h-1.5 w-1.5 rounded-full bg-success" />
+    <span className="inline-flex items-center gap-1 rounded-full bg-success/20 px-2 py-1 text-[11px] font-medium text-success">
+      <CheckIcon className="h-3 w-3 shrink-0" />
       Live
+    </span>
+  );
+}
+
+/** A server's operating state, distinct from severity: whether it is
+ *  confined and trusted, still settling in ("running"), pulled aside for
+ *  misbehaving ("quarantine"), or not confined at all ("offline"). */
+export type ServerStatus = "offline" | "running" | "confined" | "quarantine";
+
+const STATUS_STYLE: Record<ServerStatus, { cls: string; label: string; icon: ReactNode }> = {
+  offline: { cls: "bg-surface-2 text-text-faint", label: "Offline", icon: <PowerIcon className="h-3 w-3 shrink-0" /> },
+  running: { cls: "bg-primary/20 text-primary", label: "Running", icon: <LoaderIcon className="h-3 w-3 shrink-0" /> },
+  confined: { cls: "bg-success/20 text-success", label: "Confined", icon: <CheckIcon className="h-3 w-3 shrink-0" /> },
+  quarantine: { cls: "bg-danger/20 text-danger", label: "Quarantine", icon: <AlertIcon className="h-3 w-3 shrink-0" /> },
+};
+
+export function StatusBadge({ status }: { status: ServerStatus }) {
+  const s = STATUS_STYLE[status];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${s.cls}`}>
+      {s.icon}
+      {s.label}
     </span>
   );
 }
@@ -166,7 +243,7 @@ export function StatCard({
   label: string;
   value: ReactNode;
   hint?: ReactNode;
-  tone?: "default" | "good" | "warn" | "bad" | "accent";
+  tone?: "default" | "good" | "warn" | "bad" | "primary";
   chart?: ReactNode;
 }) {
   const toneClass = {
@@ -174,10 +251,10 @@ export function StatCard({
     good: "text-success",
     warn: "text-warning",
     bad: "text-danger",
-    accent: "text-accent",
+    primary: "text-primary",
   }[tone];
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
+    <div className="rounded-xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.3)] transition-colors hover:border-border-strong">
       <div className="eyebrow">{label}</div>
       <div className="mt-2 flex items-end justify-between gap-3">
         <div className={`tabular text-[27px] font-semibold leading-none ${toneClass}`}>{value}</div>
@@ -196,7 +273,7 @@ export function Sparkline({
   values,
   width = 96,
   height = 30,
-  stroke = "var(--accent)",
+  stroke = "var(--primary)",
 }: {
   values: number[];
   width?: number;
@@ -279,12 +356,76 @@ export function ScoreRing({ score, size = 56 }: { score: number | null; size?: n
   );
 }
 
+const SEV_RING_ORDER = ["critical", "high", "medium", "low"] as const;
+
+/** ScoreRing's sibling for a server that has actually been scored: the ring
+ *  itself is a donut of its findings by severity (so you can see AT A GLANCE
+ *  whether a low score comes from one critical finding or a pile of low
+ *  ones), while the center keeps showing the score, colour-coded the same
+ *  way ScoreRing does. A server with zero findings gets a plain "clean"
+ *  ring rather than an empty one, so it doesn't read as unscored. */
+export function SeverityRing({
+  score,
+  counts,
+  size = 56,
+}: {
+  score: number | null;
+  counts: Record<string, number>;
+  size?: number;
+}) {
+  const r = (size - 6) / 2;
+  const c = 2 * Math.PI * r;
+  const scoreColor =
+    score === null ? "var(--sev-none)" : score >= 80 ? "var(--success)" : score >= 50 ? "var(--warning)" : "var(--danger)";
+  const total = SEV_RING_ORDER.reduce((a, k) => a + (counts[k] || 0), 0);
+  const segments =
+    total === 0
+      ? [{ key: "none", frac: 1, color: "var(--sev-none)" }]
+      : SEV_RING_ORDER.filter((k) => counts[k]).map((k) => ({
+          key: k,
+          frac: (counts[k] || 0) / total,
+          color: `var(--sev-${k})`,
+        }));
+
+  let offset = 0;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={4} />
+        {segments.map((seg) => {
+          const dash = Math.max(c * seg.frac - (segments.length > 1 ? 1.5 : 0), 0);
+          const el = (
+            <circle
+              key={seg.key}
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              stroke={seg.color}
+              strokeWidth={4}
+              strokeDasharray={`${dash} ${c - dash}`}
+              strokeDashoffset={-offset}
+            />
+          );
+          offset += c * seg.frac;
+          return el;
+        })}
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="tabular text-[13px] font-semibold" style={{ color: scoreColor }}>
+          {score === null ? "—" : Math.round(score)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ misc */
 
 export function Spinner({ label }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 text-text-faint">
-      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border-strong border-t-accent" />
+      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border-strong border-t-primary" />
       {label && <span className="text-[13px]">{label}</span>}
     </div>
   );

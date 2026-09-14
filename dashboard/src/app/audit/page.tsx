@@ -118,7 +118,7 @@ export default function AuditPage() {
           <select
             value={serverFilter}
             onChange={(e) => setServerFilter(e.target.value)}
-            className="rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-text focus:border-accent focus:outline-none"
+            className="rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-text transition-colors focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/15"
           >
             <option value="all">All servers</option>
             {servers?.map((s) => (
@@ -135,7 +135,7 @@ export default function AuditPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter by tool, reason or evidence…"
-            className="ml-auto w-64 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] text-text placeholder:text-text-faint focus:border-accent focus:outline-none"
+            className="ml-auto w-64 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12.5px] text-text placeholder:text-text-faint transition-colors focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/15"
           />
         </div>
 
@@ -153,12 +153,22 @@ export default function AuditPage() {
         )}
 
         {!error && filtered && filtered.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[12.5px]">
+          <div className="w-full overflow-hidden">
+            <table className="w-full table-fixed border-collapse text-[12.5px]">
+              <colgroup>
+                <col className="w-[28px]" />
+                <col className="w-[9%]" />
+                <col className="w-[20%]" />
+                <col className="w-[20%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[9%]" />
+                <col className="w-[10%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-border text-left">
-                  {["", "Time", "Server", "Tool", "Decision", "Severity", "Latency", "Syscalls", "Paths", "Data"].map((h) => (
-                    <th key={h} className="eyebrow whitespace-nowrap px-3 py-2.5 font-semibold">
+                  {["", "Time", "Server", "Tool", "Decision", "Severity", "Latency", "Data"].map((h) => (
+                    <th key={h} className="eyebrow truncate px-2.5 py-2.5 font-semibold">
                       {h}
                     </th>
                   ))}
@@ -177,7 +187,7 @@ export default function AuditPage() {
                           expanded ? "bg-surface-hover" : ""
                         }`}
                       >
-                        <td className="px-3 py-2 text-text-faint">
+                        <td className="px-2.5 py-2 text-text-faint">
                           <svg
                             viewBox="0 0 24 24"
                             className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -191,29 +201,27 @@ export default function AuditPage() {
                           </svg>
                         </td>
                         <td
-                          className="tabular whitespace-nowrap px-3 py-2 text-text-muted"
+                          className="tabular truncate px-2.5 py-2 text-text-muted"
                           title={r.event_ts}
                         >
                           {formatTime(r.event_ts)}
                         </td>
-                        <td className="max-w-[210px] truncate px-3 py-2 text-text-muted" title={r.serverLabel}>
+                        <td className="truncate px-2.5 py-2 text-text-muted" title={r.serverLabel}>
                           {r.serverLabel}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="truncate px-2.5 py-2">
                           <Mono className={r.tool_name ? "text-text" : "text-text-faint"}>
                             {r.tool_name || "handshake"}
                           </Mono>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="truncate px-2.5 py-2">
                           <DecisionBadge decision={r.decision} />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="truncate px-2.5 py-2">
                           {interesting ? <SeverityBadge severity={sev} /> : <span className="text-text-faint">—</span>}
                         </td>
-                        <td className="tabular px-3 py-2 text-text-muted">{r.latency_ms ?? "—"}ms</td>
-                        <td className="tabular px-3 py-2 text-text-muted">{num(r.syscall_count)}</td>
-                        <td className="tabular px-3 py-2 text-text-muted">{num(r.distinct_paths)}</td>
-                        <td className="px-3 py-2">
+                        <td className="tabular truncate px-2.5 py-2 text-text-muted">{r.latency_ms ?? "—"}ms</td>
+                        <td className="truncate px-2.5 py-2">
                           {r.sensitive_data_flag ? (
                             <span className="rounded border border-sev-high/30 bg-sev-high/10 px-1.5 py-0.5 text-[10.5px] font-medium text-sev-high">
                               Sensitive
@@ -225,7 +233,7 @@ export default function AuditPage() {
                       </tr>
                       {expanded && (
                         <tr className="row-in border-b border-border bg-bg-elevated">
-                          <td colSpan={10} className="px-3 py-4">
+                          <td colSpan={8} className="px-3 py-4">
                             <EventDetail row={r} />
                           </td>
                         </tr>
@@ -310,10 +318,10 @@ function EventDetail({ row }: { row: Row }) {
                 <div key={i} className="rounded-lg border border-border bg-surface p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <SeverityBadge severity={f.severity} />
-                    <span className="text-[12.5px] font-medium text-text">{f.title}</span>
+                    <span className="text-[12.5px] text-text">{f.title}</span>
                     <Mono className="text-text-faint">{f.detector}</Mono>
                     {f.kernel_attested && (
-                      <span className="rounded border border-accent-border bg-accent-bg px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                      <span className="rounded border border-primary/35 bg-primary/12 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                         kernel-attested
                       </span>
                     )}

@@ -10,74 +10,94 @@
   Palette notes: this is an operations console read for long stretches, so
   the base is a near-black blue-grey rather than pure black (less halation
   on OLED, less glare on LCD) and surfaces step up in small increments so
-  nesting stays legible without borders doing all the work. The primary
-  accent is teal rather than the usual dashboard blue, which frees the blue
-  end of the spectrum to mean nothing in particular and keeps saturated
-  colour reserved for severity - if everything is accented, severity stops
-  reading as a signal.
+  nesting stays legible without borders doing all the work. Borders are
+  translucent white overlays rather than a fixed slate hex - they read as
+  a hairline on whatever surface they sit on instead of a flat colour
+  block, which is what keeps dense, layered panels feeling calm rather than
+  boxed-in. (Checked against linear.app's own dark theme: their body is
+  rgb(8,9,10) and text rgb(247,248,248) - near enough to what was already
+  here to confirm the base tone, not change it.)
+
+  The brand highlight is shadcn's "sky" theme (applied via
+  `shadcn apply --only theme`, not hand-picked hex) - a light-blue family
+  that stays clear of the orange/amber end of the severity ramp below, so a
+  button or focus ring is never mistaken for a "high severity" signal.
+  `--primary` IS the highlight; there is deliberately no separate
+  `--accent` namespace any more; it existed as an app-specific alias and
+  collided with shadcn's own reserved `--accent` token (a neutral hover
+  surface, not a brand colour) every time a preset was (re-)applied, which
+  is what broke the highlight color twice in a row. One token, one job.
+
+  This app never toggles light/dark - `<html>` always carries the `dark`
+  class - so the dark values live directly in `:root` and there is no
+  separate `.dark` block to fall out of sync with it.
 */
 :root {
-  --bg: #080b10;
-  --bg-elevated: #0d1118;
-  --surface: #11161f;
-  --surface-2: #161c27;
-  --surface-hover: #1b2230;
-  --border: #1e2632;
-  --border-strong: #2c3644;
+  --bg: #08090c;
+  --bg-elevated: #0d0f14;
+  --surface: #111319;
+  --surface-2: #161923;
+  --surface-hover: #1c2029;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
-  --text: #e8ecf2;
-  --text-muted: #97a3b6;
-  --text-faint: #5f6b7d;
+  --text: #e9eaf2;
+  --text-muted: #98a0b3;
+  --text-faint: #5c6270;
 
-  --accent: oklch(0.666 0.179 58.318);
-  --accent-dim: oklch(0.555 0.163 48.998);
-  --accent-bg: oklch(0.666 0.179 58.318 / 0.12);
-  --accent-border: oklch(0.666 0.179 58.318 / 0.35);
+  /* shadcn "sky" theme, dark variant - the one and only highlight color. */
+  --primary: oklch(0.443 0.11 240.79);
+  --primary-foreground: oklch(0.977 0.013 236.62);
 
-  /* Severity ramp. Deliberately monotonic in both hue and lightness so it
-     survives greyscale printing and the common forms of colour blindness. */
+  /* Severity ramp - traffic-light palette per brand reference (forest green
+     -> gold -> web orange -> CMYK red). Text labels always ride alongside
+     these colours on every badge, so the classic red/green colourblind
+     confusion still resolves - nothing here depends on colour alone. */
   --sev-none: #64748b;
-  --sev-low: #38bdf8;
-  --sev-medium: #fbbf24;
-  --sev-high: #fb923c;
-  --sev-critical: #f43f5e;
+  --sev-low: #2d9b2b;
+  --sev-medium: #ffd700;
+  --sev-high: #ffa500;
+  --sev-critical: #e12c2c;
 
-  --success: #34d399;
-  --success-bg: rgba(52, 211, 153, 0.12);
-  --warning: #fbbf24;
-  --warning-bg: rgba(251, 191, 36, 0.12);
-  --danger: #f43f5e;
-  --danger-bg: rgba(244, 63, 94, 0.12);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.147 0.004 49.25);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.147 0.004 49.25);
-  --primary: oklch(0.555 0.163 48.998);
-  --primary-foreground: oklch(0.987 0.022 95.277);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0.001 106.424);
-  --muted-foreground: oklch(0.553 0.013 58.071);
-  --accent-foreground: oklch(0.987 0.022 95.277);
-  --destructive: oklch(0.577 0.245 27.325);
-  --input: oklch(0.923 0.003 48.717);
-  --ring: oklch(0.709 0.01 56.259);
+  --success: #2d9b2b;
+  --success-bg: rgba(45, 155, 43, 0.12);
+  --warning: #ffd700;
+  --warning-bg: rgba(255, 215, 0, 0.12);
+  --danger: #e12c2c;
+  --danger-bg: rgba(225, 44, 44, 0.12);
+
+  /* Generic shadcn tokens below - not consumed by this app's own
+     components yet, kept dark-themed and coherent with --primary so any
+     real shadcn/ui component added later drops in without a second pass. */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --input: oklch(1 0 0 / 15%);
+  --ring: var(--primary);
   --chart-1: oklch(0.845 0.143 164.978);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.596 0.145 163.225);
   --chart-4: oklch(0.508 0.118 165.612);
   --chart-5: oklch(0.432 0.095 166.913);
-  --radius: 0.875rem;
-  --sidebar: oklch(0.985 0.001 106.423);
-  --sidebar-foreground: oklch(0.147 0.004 49.25);
-  --sidebar-primary: oklch(0.666 0.179 58.318);
-  --sidebar-primary-foreground: oklch(0.987 0.022 95.277);
-  --sidebar-accent: oklch(0.97 0.001 106.424);
-  --sidebar-accent-foreground: oklch(0.216 0.006 56.043);
-  --sidebar-border: oklch(0.923 0.003 48.717);
-  --sidebar-ring: oklch(0.709 0.01 56.259);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.25);
+  --radius: 0.55rem;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.685 0.169 237.323);
+  --sidebar-primary-foreground: oklch(0.293 0.066 243.157);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: var(--primary);
 }
 
 @theme inline {
@@ -91,8 +111,6 @@
   --color-text: var(--text);
   --color-text-muted: var(--text-muted);
   --color-text-faint: var(--text-faint);
-  --color-accent: var(--accent);
-  --color-accent-dim: var(--accent-dim);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
@@ -103,7 +121,6 @@
   --color-sev-critical: var(--sev-critical);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-plex-mono);
-  --font-heading: var(--font-heading);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -121,6 +138,7 @@
   --color-input: var(--input);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -172,8 +190,8 @@ body {
 }
 
 ::selection {
-  background: var(--accent-dim);
-  color: #04100e;
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 
 * {
@@ -196,44 +214,6 @@ body {
 }
 .row-in {
   animation: row-in 180ms ease-out;
-}
-/*
-  ---break---
-*/
-.dark {
-  --background: oklch(0.147 0.004 49.25);
-  --foreground: oklch(0.985 0.001 106.423);
-  --card: oklch(0.216 0.006 56.043);
-  --card-foreground: oklch(0.985 0.001 106.423);
-  --popover: oklch(0.216 0.006 56.043);
-  --popover-foreground: oklch(0.985 0.001 106.423);
-  --primary: oklch(0.473 0.137 46.201);
-  --primary-foreground: oklch(0.987 0.022 95.277);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.268 0.007 34.298);
-  --muted-foreground: oklch(0.709 0.01 56.259);
-  /* preset: keep the console's teal brand accent; shadcn's grey `accent` clashes by name */
-  /* preset brand orange, kept bright enough for text on the dark base */
-  --accent: oklch(0.666 0.179 58.318);
-  --accent-foreground: oklch(0.987 0.022 95.277);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: #1e2632;
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.553 0.013 58.071);
-  --chart-1: oklch(0.845 0.143 164.978);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.596 0.145 163.225);
-  --chart-4: oklch(0.508 0.118 165.612);
-  --chart-5: oklch(0.432 0.095 166.913);
-  --sidebar: oklch(0.216 0.006 56.043);
-  --sidebar-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-primary: oklch(0.769 0.188 70.08);
-  --sidebar-primary-foreground: oklch(0.279 0.077 45.635);
-  --sidebar-accent: oklch(0.268 0.007 34.298);
-  --sidebar-accent-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.553 0.013 58.071);
 }
 /*
   ---break---

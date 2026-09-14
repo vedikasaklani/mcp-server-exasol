@@ -1,22 +1,14 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono, DM_Sans, Inter, Nunito_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Saira } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { cn } from "@/lib/utils";
 
-const nunitoSansHeading = Nunito_Sans({subsets:['latin'],variable:'--font-heading'});
-
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
-
-
-// Plex reads as instrumentation rather than as a marketing site, and its
-// mono companion is metrically matched, so ids and counts sit correctly
-// next to prose without the two fonts fighting over baseline.
-const plexSans = IBM_Plex_Sans({
-  variable: "--font-plex-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
+// Saira for interface text - a grotesque with a slight technical/engineered
+// edge that suits a security console. Plex Mono is metrically distinct on
+// purpose: ids, counts and syscalls should read as instrumentation, not
+// prose, so they get their own typeface.
+const saira = Saira({ subsets: ["latin"], variable: "--font-sans" });
 
 const plexMono = IBM_Plex_Mono({
   variable: "--font-plex-mono",
@@ -33,7 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={cn("dark", "h-full", "antialiased", plexSans.variable, plexMono.variable, "font-sans", inter.variable, nunitoSansHeading.variable)}
+      className={cn("dark", "h-full", "antialiased", "font-sans", saira.variable, plexMono.variable)}
     >
       <body className="min-h-full bg-bg text-text">
         <div className="flex h-screen overflow-hidden">
