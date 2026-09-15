@@ -543,9 +543,7 @@ def api_run_scan(server_id: str, db: Session = Depends(get_db)):
     sync_scan_run(db, run.scan_run_id)
     db.refresh(run)
 
-    counts: dict[str, int] = {}
-    for finding in result["findings"]:
-        counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
+    rule_findings = [{**finding, "phase": "rule"} for finding in result["findings"]]
     return {
         "scan_run_id": run.scan_run_id,
         "server_id": server_id,
@@ -553,16 +551,77 @@ def api_run_scan(server_id: str, db: Session = Depends(get_db)):
         "status": run.status,
         "verdict": result["verdict"],
         "analyzer": "warden-builtin",
-        "severity_counts": counts,
-        "findings": result["findings"],
+        "severity_counts": _severity_counts(rule_findings),
+        "findings": rule_findings,
         "tool_declarations": result["tool_declarations"],
         "package": result.get("package") or {},
     }
 
 
+def _severity_counts(findings: list[dict]) -> dict[str, int]:
+    """Severity histogram for the dashboard bars.
+
+    Keys are lowercased so the UI can look them up without guessing casing:
+    the scanners emit mixed forms ("CRITICAL" from semgrep and Cisco,
+    "critical" from the built-in runner rules).
+    """
+    counts: dict[str, int] = {}
+    for finding in findings:
+        key = (finding.get("severity") or "low").lower()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _scan_finding_entries(run: ScanRun) -> list[dict]:
+    """Rule and LLM findings for one scan, each tagged with the phase that
+    produced it. The dashboard used to receive only the rule leg, so a repo
+    that only the behavioural analyzer flagged was invisible to it."""
+    findings: list[dict] = []
+    if run.rule_result is not None:
+        findings.extend(
+            {
+                "id": f.id,
+                "phase": "rule",
+                "severity": f.severity,
+                "rule_id": f.rule_id,
+                "analyzer": f.analyzer,
+                "tool_name": None,
+                "message": f.message,
+                "file": f.file,
+                "line": f.line,
+                "details": f.details,
+            }
+            for f in run.rule_result.rule_findings
+        )
+    if run.llm_result is not None:
+        findings.extend(
+            {
+                "id": f.id,
+                "phase": "llm",
+                "severity": f.severity,
+                "rule_id": None,
+                "analyzer": f.analyzer,
+                "tool_name": f.tool_name,
+                "message": f.threat_summary,
+                "file": None,
+                "line": None,
+                "details": {
+                    "threat_names": f.threat_names or [],
+                    "mcp_taxonomies": f.mcp_taxonomies or [],
+                    "total_findings": f.total_findings,
+                    "target": f.target,
+                },
+            }
+            for f in run.llm_result.tool_findings
+        )
+    return findings
+
+
 @app.get("/servers/{server_id}/scans")
 def api_list_scans(server_id: str, db: Session = Depends(get_db)):
-    """Scan history for one server, newest first."""
+    """Scan history for one server, newest first. The findings array covers
+    both phases - rule findings and LLM behavioural findings - each tagged
+    with the phase that found it."""
     runs = (
         db.query(ScanRun)
         .filter(ScanRun.server_id == server_id)
@@ -572,10 +631,7 @@ def api_list_scans(server_id: str, db: Session = Depends(get_db)):
     )
     out = []
     for run in runs:
-        findings = run.rule_result.rule_findings if run.rule_result else []
-        counts: dict[str, int] = {}
-        for finding in findings:
-            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+        findings = _scan_finding_entries(run)
         out.append({
             "scan_run_id": run.scan_run_id,
             "commit_sha": run.commit_sha,
@@ -583,18 +639,9 @@ def api_list_scans(server_id: str, db: Session = Depends(get_db)):
             "started_at": run.started_at.isoformat() if run.started_at else None,
             "finished_at": run.finished_at.isoformat() if run.finished_at else None,
             "verdict": run.rule_result.verdict.value if run.rule_result else None,
-            "severity_counts": counts,
-            "findings": [
-                {
-                    "rule_id": f.rule_id,
-                    "severity": f.severity,
-                    "message": f.message,
-                    "file": f.file,
-                    "line": f.line,
-                    "analyzer": f.analyzer,
-                }
-                for f in findings
-            ],
+            "llm_verdict": run.llm_result.verdict.value if run.llm_result else None,
+            "severity_counts": _severity_counts(findings),
+            "findings": findings,
         })
     return out
 
